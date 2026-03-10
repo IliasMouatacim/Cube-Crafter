@@ -9,31 +9,32 @@ const publicDir = path.join(__dirname, 'public');
 
 if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir);
 
-https.get('https://commons.wikimedia.org/w/api.php?action=query&titles=File:Kevin_MacLeod_-_Wallpaper.ogg&prop=imageinfo&iiprop=url&format=json', { headers: { 'User-Agent': 'NodeBot/1.0' } }, res => {
-    let data = '';
-    res.on('data', chunk => data += chunk);
-    res.on('end', () => {
-        try {
-            const json = JSON.parse(data);
-            const pages = json.query.pages;
-            const pageId = Object.keys(pages)[0];
-            const url = pages[pageId].imageinfo[0].url;
-            console.log('Fetching from:', url);
+// Downloading a relaxing acoustic/lofi track provided by an open source repository
+const url = 'https://raw.githubusercontent.com/mdn/webaudio-examples/main/audio-analyser/viper.mp3';
+// An alternative is a completely ambient drone sound if the mdn one is too energetic:
+const altUrl = 'https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112191.mp3'
 
-            const file = fs.createWriteStream(path.join(publicDir, 'bgm.ogg'));
+console.log('Fetching lofi track...');
 
-            https.get(url, { headers: { 'User-Agent': 'NodeBot/1.0' } }, response => {
-                response.pipe(file);
-                file.on('finish', () => {
-                    file.close();
-                    console.log('Download complete');
-                });
-            }).on('error', err => {
-                console.error('Download error:', err.message);
+const file = fs.createWriteStream(path.join(publicDir, 'bgm.mp3'));
+
+https.get(altUrl, { headers: { 'User-Agent': 'NodeBot/1.0' } }, response => {
+    // Follow redirect
+    if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        https.get(response.headers.location, { headers: { 'User-Agent': 'NodeBot/1.0' } }, res2 => {
+            res2.pipe(file);
+            file.on('finish', () => {
+                file.close();
+                console.log('Download complete');
             });
-        } catch (e) {
-            console.error('Error parsing JSON:', e.message);
-            console.error('Raw data:', data);
-        }
-    });
+        });
+    } else {
+        response.pipe(file);
+        file.on('finish', () => {
+            file.close();
+            console.log('Download complete');
+        });
+    }
+}).on('error', err => {
+    console.error('Download error:', err.message);
 });
