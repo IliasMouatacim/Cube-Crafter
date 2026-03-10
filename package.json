@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "canvas": "^3.2.1",
+    "peerjs": "^1.5.5",
     "three": "^0.160.0"
   },
   "devDependencies": {

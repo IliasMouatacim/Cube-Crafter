@@ -13,14 +13,14 @@ import { WorldGenerator } from './worldgen.js';
 // Reusable temp color for mesh building
 const _tmpColor = new THREE.Color();
 
-// Face directions: [dx, dy, dz, faceIndex]
+// Face directions: [dx, dy, dz], corners (relative), and base UV mapping for each corner
 const FACES = [
-  { dir: [1, 0, 0], corners: [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]], uvRow: 0 }, // +X right
-  { dir: [-1, 0, 0], corners: [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]], uvRow: 1 }, // -X left
-  { dir: [0, 1, 0], corners: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]], uvRow: 2 }, // +Y top
-  { dir: [0, -1, 0], corners: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], uvRow: 3 }, // -Y bottom
-  { dir: [0, 0, 1], corners: [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], uvRow: 4 }, // +Z front
-  { dir: [0, 0, -1], corners: [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]], uvRow: 5 }, // -Z back
+  { dir: [1, 0, 0], corners: [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]], uvs: [[1, 0], [1, 1], [0, 1], [0, 0]] }, // +X right
+  { dir: [-1, 0, 0], corners: [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]], uvs: [[1, 0], [1, 1], [0, 1], [0, 0]] }, // -X left
+  { dir: [0, 1, 0], corners: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]], uvs: [[0, 0], [1, 0], [1, 1], [0, 1]] }, // +Y top
+  { dir: [0, -1, 0], corners: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], uvs: [[0, 1], [1, 1], [1, 0], [0, 0]] }, // -Y bottom
+  { dir: [0, 0, 1], corners: [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], uvs: [[0, 0], [1, 0], [1, 1], [0, 1]] }, // +Z front
+  { dir: [0, 0, -1], corners: [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]], uvs: [[0, 0], [1, 0], [1, 1], [0, 1]] }, // -Z back
 ];
 
 export class Chunk {
@@ -62,17 +62,19 @@ export class Chunk {
   }
 
   // Build optimized mesh using greedy-ish face culling
-  buildMesh(scene) {
+  buildMesh(scene, materials) {
     if (!this.blocks) return;
 
     const positions = [];
     const normals = [];
     const colors = [];
+    const uvs = [];
     const indices = [];
     // Water gets a separate transparent mesh
     const waterPositions = [];
     const waterNormals = [];
     const waterColors = [];
+    const waterUvs = [];
     const waterIndices = [];
 
     let vertCount = 0;
@@ -124,8 +126,22 @@ export class Chunk {
             const pArr = isWater ? waterPositions : positions;
             const nArr = isWater ? waterNormals : normals;
             const cArr = isWater ? waterColors : colors;
+            const uArr = isWater ? waterUvs : uvs;
             const iArr = isWater ? waterIndices : indices;
             const vc = isWater ? waterVertCount : vertCount;
+
+            // --- TEXTURE UV CALCULATIONS ---
+            let blockUV = bd.uv;
+            if (face.dir[1] === 1 && bd.uvTop) blockUV = bd.uvTop;
+            else if (face.dir[1] === -1 && bd.uvBottom) blockUV = bd.uvBottom;
+            else if (face.dir[2] === 1 && bd.uvFront) blockUV = bd.uvFront; // mostly for furnace
+            else if (face.dir[1] === 0 && bd.uvSide) blockUV = bd.uvSide;
+
+            if (!blockUV) blockUV = [0, 0]; // fallback
+
+            // Texture atlas is 16 tiles by 16 tiles
+            const uOffset = blockUV[0] * (1 / 16);
+            const vOffset = 1.0 - (blockUV[1] * (1 / 16)) - (1 / 16);
 
             // --- THIN BLOCK LOGIC ---
             // If the block is thin, we adjust the corner offsets
@@ -148,12 +164,18 @@ export class Chunk {
               }
             }
 
-            for (const corner of face.corners) {
+            for (let c = 0; c < 4; c++) {
+              const corner = face.corners[c];
+              const baseUv = face.uvs[c];
               const cx = corner[0] === 0 ? offsetX1 : offsetX2;
               const cz = corner[2] === 0 ? offsetZ1 : offsetZ2;
               pArr.push(wx + cx, ly + corner[1] - (isWater ? 0.1 : 0), wz + cz);
               nArr.push(face.dir[0], face.dir[1], face.dir[2]);
               cArr.push(_tmpColor.r, _tmpColor.g, _tmpColor.b);
+
+              const finalU = uOffset + baseUv[0] * (1 / 16);
+              const finalV = vOffset + baseUv[1] * (1 / 16);
+              uArr.push(finalU, finalV);
             }
 
             iArr.push(vc, vc + 1, vc + 2, vc, vc + 2, vc + 3);
@@ -174,9 +196,10 @@ export class Chunk {
       geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
       geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
       geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
       geom.setIndex(indices);
 
-      const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+      let mat = materials ? materials.solid : new THREE.MeshLambertMaterial({ vertexColors: true });
       this.mesh = new THREE.Mesh(geom, mat);
       this.mesh.userData.isChunk = true;
       scene.add(this.mesh);
@@ -188,9 +211,10 @@ export class Chunk {
       geom.setAttribute('position', new THREE.Float32BufferAttribute(waterPositions, 3));
       geom.setAttribute('normal', new THREE.Float32BufferAttribute(waterNormals, 3));
       geom.setAttribute('color', new THREE.Float32BufferAttribute(waterColors, 3));
+      geom.setAttribute('uv', new THREE.Float32BufferAttribute(waterUvs, 2));
       geom.setIndex(waterIndices);
 
-      const mat = new THREE.MeshLambertMaterial({
+      let mat = materials ? materials.water : new THREE.MeshLambertMaterial({
         vertexColors: true,
         transparent: true,
         opacity: 0.6,

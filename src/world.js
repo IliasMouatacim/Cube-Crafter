@@ -10,8 +10,9 @@ import { Chunk } from './chunk.js';
 import { WorldGenerator } from './worldgen.js';
 
 export class World {
-  constructor(scene, seed = 42) {
+  constructor(scene, seed = 42, materials = null) {
     this.scene = scene;
+    this.materials = materials;
     this.generator = new WorldGenerator(seed);
     this.chunks = new Map(); // key: "cx,cz" -> Chunk
     this.seed = seed;
@@ -28,6 +29,15 @@ export class World {
 
   chunkKey(cx, cz) {
     return `${cx},${cz}`;
+  }
+
+  dispose() {
+    for (const [, chunk] of this.chunks) {
+      chunk.dispose(this.scene);
+    }
+    this.chunks.clear();
+    this.loadQueue = [];
+    this.meshQueue = [];
   }
 
   getChunk(cx, cz) {
@@ -159,14 +169,14 @@ export class World {
     while (this.meshQueue.length > 0 && built < this.maxMeshBuildsPerFrame) {
       const chunk = this.meshQueue.shift();
       if (!this.chunks.has(this.chunkKey(chunk.cx, chunk.cz))) continue;
-      chunk.buildMesh(this.scene);
+      chunk.buildMesh(this.scene, this.materials);
       built++;
     }
 
     // Rebuild dirty chunks (from block modifications)
     for (const chunk of this.chunks.values()) {
       if (chunk.dirty && chunk.generated && built < this.maxMeshBuildsPerFrame + 2) {
-        chunk.buildMesh(this.scene);
+        chunk.buildMesh(this.scene, this.materials);
         built++;
       }
     }

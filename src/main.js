@@ -69,8 +69,32 @@ class Game {
     // World seed
     this.seed = Math.floor(Math.random() * 100000);
 
+    // Texture Atlas Shared Materials
+    const textureLoader = new THREE.TextureLoader();
+    const atlasTexture = textureLoader.load('atlas.png');
+    atlasTexture.magFilter = THREE.NearestFilter;
+    atlasTexture.minFilter = THREE.NearestFilter;
+
+    // We use SRGB mode if supported, but older Three.js uses mostly linear by default.
+    if (THREE.SRGBColorSpace) atlasTexture.colorSpace = THREE.SRGBColorSpace;
+    else if (THREE.sRGBEncoding) atlasTexture.encoding = THREE.sRGBEncoding;
+
+    this.materials = {
+      solid: new THREE.MeshLambertMaterial({
+        map: atlasTexture,
+        vertexColors: true,
+      }),
+      water: new THREE.MeshLambertMaterial({
+        map: atlasTexture,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.6,
+        side: THREE.DoubleSide,
+      })
+    };
+
     // Core systems
-    this.world = new World(this.scene, this.seed);
+    this.world = new World(this.scene, this.seed, this.materials);
     this.dayNight = new DayNightCycle(this.scene);
     this.mobs = new MobManager(this.scene, this.world);
     // Sound & particles
@@ -1058,7 +1082,7 @@ class Game {
       if (seed !== undefined && seed !== this.seed) {
         this.seed = seed;
         this.world.dispose();
-        this.world = new World(this.scene, this.seed);
+        this.world = new World(this.scene, this.seed, this.materials);
         this.player.world = this.world;
       }
       this.start(false, true);
