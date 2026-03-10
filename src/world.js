@@ -23,6 +23,11 @@ export class World {
     this.maxChunkLoadsPerFrame = 4;
     this.maxMeshBuildsPerFrame = 3;
 
+    // Fluid simulation sets containing world coordinates "wx,wy,wz"
+    this.fluidQueue = new Set();
+    this.nextFluidQueue = new Set();
+    this.tickCount = 0;
+
     // Door open/closed states: key "x,y,z" -> true (open)
     this.doorStates = new Map();
   }
@@ -67,11 +72,52 @@ export class World {
     const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
     chunk.setBlock(lx, wy, lz, type);
 
+    // Queue update for this block and neighbors for fluids
+    this.scheduleFluidUpdate(wx, wy, wz);
+    this.scheduleFluidUpdate(wx + 1, wy, wz);
+    this.scheduleFluidUpdate(wx - 1, wy, wz);
+    this.scheduleFluidUpdate(wx, wy + 1, wz);
+    this.scheduleFluidUpdate(wx, wy - 1, wz);
+    this.scheduleFluidUpdate(wx, wy, wz + 1);
+    this.scheduleFluidUpdate(wx, wy, wz - 1);
+
     // Mark adjacent chunks dirty if block is on boundary
     if (lx === 0) this._markDirty(cx - 1, cz);
     if (lx === CHUNK_SIZE - 1) this._markDirty(cx + 1, cz);
     if (lz === 0) this._markDirty(cx, cz - 1);
     if (lz === CHUNK_SIZE - 1) this._markDirty(cx, cz + 1);
+  }
+
+  getMetadata(wx, wy, wz) {
+    if (wy < 0 || wy >= CHUNK_HEIGHT) return 0;
+    const cx = Math.floor(wx / CHUNK_SIZE);
+    const cz = Math.floor(wz / CHUNK_SIZE);
+    const chunk = this.getChunk(cx, cz);
+    if (!chunk || !chunk.metadata) return 0;
+    const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    return chunk.getMetadata(lx, wy, lz);
+  }
+
+  setMetadata(wx, wy, wz, value) {
+    if (wy < 0 || wy >= CHUNK_HEIGHT) return;
+    const cx = Math.floor(wx / CHUNK_SIZE);
+    const cz = Math.floor(wz / CHUNK_SIZE);
+    const chunk = this.getChunk(cx, cz);
+    if (!chunk || !chunk.metadata) return;
+    const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    chunk.setMetadata(lx, wy, lz, value);
+
+    // Mark adjacent chunks dirty if block is on boundary
+    if (lx === 0) this._markDirty(cx - 1, cz);
+    if (lx === CHUNK_SIZE - 1) this._markDirty(cx + 1, cz);
+    if (lz === 0) this._markDirty(cx, cz - 1);
+    if (lz === CHUNK_SIZE - 1) this._markDirty(cx, cz + 1);
+  }
+
+  scheduleFluidUpdate(wx, wy, wz) {
+    this.fluidQueue.add(`${wx},${wy},${wz}`);
   }
 
   _markDirty(cx, cz) {
@@ -159,6 +205,18 @@ export class World {
       if (!this.chunks.has(this.chunkKey(chunk.cx, chunk.cz))) continue;
       if (!chunk.generated) {
         chunk.generate(this.generator);
+
+        // Scan newly generated chunk for water blocks to add to queue
+        for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+          for (let ly = 0; ly < CHUNK_HEIGHT; ly++) {
+            for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+              if (chunk.getBlock(lx, ly, lz) === BlockType.WATER) {
+                this.fluidQueue.add(`${chunk.cx * CHUNK_SIZE + lx},${ly},${chunk.cz * CHUNK_SIZE + lz}`);
+              }
+            }
+          }
+        }
+
         this.meshQueue.push(chunk);
         loaded++;
       }
@@ -179,6 +237,128 @@ export class World {
         chunk.buildMesh(this.scene, this.materials);
         built++;
       }
+    }
+  }
+
+  // Called periodically from main game loop (e.g. 5 times per second)
+  simulateFluids() {
+    if (this.fluidQueue.size === 0) return;
+
+    // Swap queues
+    const queue = Array.from(this.fluidQueue);
+    this.fluidQueue.clear();
+
+    for (const key of queue) {
+      const [wx, wy, wz] = key.split(',').map(Number);
+      const block = this.getBlock(wx, wy, wz);
+
+      if (block === BlockType.WATER || block === BlockType.LAVA) {
+        const meta = this.getMetadata(wx, wy, wz);
+
+        // Max spread distance
+        if (meta >= 7) {
+          // Check if neighbors need to dry up if a source was removed
+          this._checkFluidDrying(wx, wy, wz, block, meta);
+          continue;
+        }
+
+        const downBlock = this.getBlock(wx, wy - 1, wz);
+        const canFlowDown = this._canFluidFlowInto(downBlock);
+
+        if (canFlowDown) {
+          this.setBlock(wx, wy - 1, wz, block);
+          this.setMetadata(wx, wy - 1, wz, 1); // Falling water is level 1
+          this.fluidQueue.add(`${wx},${wy - 1},${wz}`);
+        } else if (downBlock === block) {
+          // Ensure falling water combines into full column
+          // Horizontal flow
+          this._flowFluidHorizontally(wx, wy, wz, block, meta);
+        } else {
+          // Flow horizontally
+          this._flowFluidHorizontally(wx, wy, wz, block, meta);
+        }
+
+        this._checkFluidDrying(wx, wy, wz, block, meta);
+      } else {
+        // Was water, now something else/air, check neighbors if they need to dry
+        // Handled naturally by the drying loop on next tick since source is gone
+      }
+    }
+  }
+
+  _canFluidFlowInto(blockType) {
+    return blockType === BlockType.AIR || blockType === BlockType.WATER || blockType === BlockType.LAVA ||
+      blockType === BlockType.TORCH || blockType === BlockType.GRASS || blockType === BlockType.SNOW || blockType === BlockType.COBWEB || blockType === BlockType.LADDER;
+  }
+
+  _flowFluidHorizontally(wx, wy, wz, blockType, meta) {
+    const nextMeta = meta + 1;
+    if (nextMeta >= 7) return;
+
+    const neighbors = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
+    let flowStateChanged = false;
+
+    for (const n of neighbors) {
+      const nx = wx + n[0];
+      const nz = wz + n[2];
+      const nBlock = this.getBlock(nx, wy, nz);
+
+      // Don't overwrite same fluid if the neighbor is a lower or equal flow level (meaning it's closer to or IS a source)
+      if (this._canFluidFlowInto(nBlock)) {
+        if (nBlock === blockType) {
+          const nMeta = this.getMetadata(nx, wy, nz);
+          // Neighbor is further from source, overwrite it
+          if (nMeta > nextMeta && nMeta !== 0) {
+            this.setMetadata(nx, wy, nz, nextMeta);
+            this.fluidQueue.add(`${nx},${wy},${nz}`);
+            flowStateChanged = true;
+          }
+        } else {
+          // It's air or something replaceable
+          this.setBlock(nx, wy, nz, blockType);
+          this.setMetadata(nx, wy, nz, nextMeta);
+          this.fluidQueue.add(`${nx},${wy},${nz}`);
+          flowStateChanged = true;
+        }
+      }
+    }
+  }
+
+  _checkFluidDrying(wx, wy, wz, blockType, meta) {
+    // If we are a flowing fluid (meta > 0), verify we have a valid source supplying us
+    if (meta === 0) return; // Source block, doesn't dry
+
+    const upBlock = this.getBlock(wx, wy + 1, wz);
+    // If water above us, we are supplied
+    if (upBlock === blockType) return;
+
+    let hasValidSource = false;
+    const neighbors = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]];
+
+    for (const n of neighbors) {
+      const nx = wx + n[0];
+      const nz = wz + n[2];
+      if (this.getBlock(nx, wy, nz) === blockType) {
+        const nMeta = this.getMetadata(nx, wy, nz);
+        // Valid source if the neighbor's level is exactly one less than ours
+        // Or if the neighbor is falling water and we are spreading from it
+        if (nMeta < meta) {
+          hasValidSource = true;
+          break;
+        }
+      }
+    }
+
+    if (!hasValidSource) {
+      // Dry up completely
+      this.setBlock(wx, wy, wz, BlockType.AIR);
+      this.setMetadata(wx, wy, wz, 0);
+
+      // Tell neighbors to check themselves since we just vanished
+      for (const n of neighbors) {
+        this.scheduleFluidUpdate(wx + n[0], wy, wz + n[2]);
+      }
+      this.scheduleFluidUpdate(wx, wy - 1, wz);
     }
   }
 

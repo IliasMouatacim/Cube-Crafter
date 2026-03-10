@@ -29,6 +29,7 @@ export class Chunk {
     this.cz = cz;
     this.world = world;
     this.blocks = null;
+    this.metadata = null;
     this.mesh = null;
     this.waterMesh = null;
     this.dirty = true;
@@ -37,6 +38,7 @@ export class Chunk {
 
   generate(generator) {
     this.blocks = generator.generateChunkData(this.cx, this.cz);
+    this.metadata = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
     this.generated = true;
     this.dirty = true;
   }
@@ -57,7 +59,28 @@ export class Chunk {
   setBlock(lx, ly, lz, type) {
     if (!this.blocks) return;
     if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE || ly < 0 || ly >= CHUNK_HEIGHT) return;
-    this.blocks[WorldGenerator.blockIndex(lx, ly, lz)] = type;
+    const idx = WorldGenerator.blockIndex(lx, ly, lz);
+    this.blocks[idx] = type;
+    this.metadata[idx] = 0; // reset metadata on place
+    this.dirty = true;
+  }
+
+  getMetadata(lx, ly, lz) {
+    if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE || ly < 0 || ly >= CHUNK_HEIGHT) {
+      return this.world.getMetadata(
+        this.cx * CHUNK_SIZE + lx,
+        ly,
+        this.cz * CHUNK_SIZE + lz
+      );
+    }
+    if (!this.metadata) return 0;
+    return this.metadata[WorldGenerator.blockIndex(lx, ly, lz)];
+  }
+
+  setMetadata(lx, ly, lz, value) {
+    if (!this.metadata) return;
+    if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE || ly < 0 || ly >= CHUNK_HEIGHT) return;
+    this.metadata[WorldGenerator.blockIndex(lx, ly, lz)] = value;
     this.dirty = true;
   }
 
@@ -169,7 +192,30 @@ export class Chunk {
               const baseUv = face.uvs[c];
               const cx = corner[0] === 0 ? offsetX1 : offsetX2;
               const cz = corner[2] === 0 ? offsetZ1 : offsetZ2;
-              pArr.push(wx + cx, ly + corner[1] - (isWater ? 0.1 : 0), wz + cz);
+
+              let cy = corner[1];
+              if (isWater) {
+                // Slope water based on flow level. 0 = full, 7 = almost flat.
+                // Only slope the top face vertices (where corner[1] == 1)
+                if (cy === 1) {
+                  const meta = this.metadata ? this.metadata[WorldGenerator.blockIndex(lx, ly, lz)] : 0;
+                  // Source blocks (0) and falling water (1) are near full height.
+                  // Spreading water (2-7) gets lower.
+                  if (meta > 0 && meta < 7) {
+                    // Try to make it a bit lower if down flow
+                    cy = 1.0 - (meta * 0.125); // Drops by 1/8th of a block per step
+                  } else if (meta === 7) {
+                    cy = 0.15; // Lowest noticeable sliver
+                  }
+
+                  // Also want to average with neighbors for true smooth slope, but simple slope per block is okay for VoxelCraft initially.
+                }
+
+                // Entire water block is slightly lowered to avoid z-fighting with shore
+                cy -= 0.1;
+              }
+
+              pArr.push(wx + cx, ly + cy, wz + cz);
               nArr.push(face.dir[0], face.dir[1], face.dir[2]);
               cArr.push(_tmpColor.r, _tmpColor.g, _tmpColor.b);
 
