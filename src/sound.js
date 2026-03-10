@@ -205,7 +205,7 @@ export const BGM = {
       bgmBuffer = await ctx.decodeAudioData(arrayBuffer);
 
       bgmGain = ctx.createGain();
-      bgmGain.gain.value = 0.3; // Default volume
+      bgmGain.gain.value = 0.05; // Lower default volume for background ambiance
       bgmGain.connect(ctx.destination);
     } catch (e) {
       console.warn("Failed to load BGM:", e);
