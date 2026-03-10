@@ -160,7 +160,7 @@ canvas {
   position: fixed;
   bottom: 68px;
   left: 75%;
-  transform: translateX(-50%);
+  transform: translateX(calc(-50% - 167px));
   display: none;
   gap: 1px;
   z-index: 100;
@@ -412,7 +412,7 @@ canvas {
   position: fixed;
   bottom: 68px;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(calc(-50% - 167px));
   display: none;
   gap: 1px;
   z-index: 100;
@@ -435,7 +435,7 @@ canvas {
   position: fixed;
   bottom: 68px;
   left: 50%;
-  transform: translateX(calc(-50% + 85px));
+  transform: translateX(calc(-50% + 167px));
   display: none;
   gap: 1px;
   z-index: 100;
@@ -455,11 +455,11 @@ canvas {
 }
 
 .p2-hunger-bar {
-  left: calc(75% + 85px);
+  left: calc(75% + 167px);
 }
 
 .coop-mode #hunger-bar {
-  left: calc(25% + 85px);
+  left: calc(25% + 167px);
 }
 
 /* Durability bar under tools */
@@ -1135,10 +1135,12 @@ canvas {
 
   #health-bar {
     bottom: 52px;
+    transform: translateX(calc(-50% - 128px));
   }
 
   #hunger-bar {
     bottom: 52px;
+    transform: translateX(calc(-50% + 128px));
   }
 
   .heart {
