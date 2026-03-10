@@ -189,3 +189,50 @@ export const SoundFX = {
     src.start();
   },
 };
+
+let bgmSource = null;
+let bgmBuffer = null;
+let bgmGain = null;
+
+export const BGM = {
+  async init() {
+    if (bgmBuffer) return;
+    try {
+      const ctx = _getCtx();
+      // Fetch public domain background music (Kevin MacLeod - Wallpaper)
+      const res = await fetch('https://en.wikipedia.org/wiki/Special:FilePath/Kevin_MacLeod_-_Wallpaper.ogg');
+      const arrayBuffer = await res.arrayBuffer();
+      bgmBuffer = await ctx.decodeAudioData(arrayBuffer);
+
+      bgmGain = ctx.createGain();
+      bgmGain.gain.value = 0.3; // Default volume
+      bgmGain.connect(ctx.destination);
+    } catch (e) {
+      console.warn("Failed to load BGM:", e);
+    }
+  },
+
+  play() {
+    if (!bgmBuffer || bgmSource) return;
+    const ctx = _getCtx();
+    bgmSource = ctx.createBufferSource();
+    bgmSource.buffer = bgmBuffer;
+    bgmSource.loop = true;
+    bgmSource.connect(bgmGain);
+    bgmSource.start(0);
+  },
+
+  stop() {
+    if (bgmSource) {
+      bgmSource.stop();
+      bgmSource.disconnect();
+      bgmSource = null;
+    }
+  },
+
+  setVolume(vol) {
+    if (bgmGain) {
+      bgmGain.gain.value = vol;
+    }
+  }
+};

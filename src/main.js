@@ -12,9 +12,10 @@ import { BlockType, BlockData, REACH_DISTANCE, CHUNK_SIZE, Biome } from './block
 import { DayNightCycle } from './daynight.js';
 import { MobManager } from './mobs.js';
 import { ItemData, ItemCategory, ItemType, ToolType, getMiningSpeed, getAttackDamage, FuelValues, SmeltingRecipes } from './items.js';
-import { SoundFX } from './sound.js';
+import { SoundFX, BGM } from './sound.js';
 import { ParticleSystem } from './particles.js';
 import { TouchControls } from './touch.js';
+import { Network } from './network.js';
 
 // Reusable temp vector for main loop
 const _tmpDir = new THREE.Vector3();
@@ -78,6 +79,23 @@ class Game {
     // Mobile touch controls
     this.touch = new TouchControls();
 
+    // Multiplayer networking
+    this.network = new Network(this.scene);
+    this.network.setSeed(this.seed);
+    this.network.onRemoteBlock = (x, y, z, blockType) => {
+      this.world.setBlock(x, y, z, blockType);
+      const bd = BlockData[blockType];
+      if (blockType === BlockType.AIR) {
+        SoundFX.blockBreak();
+      } else {
+        SoundFX.blockPlace();
+      }
+    };
+    this.network.onError = (msg) => {
+      const el = document.getElementById('mp-status');
+      if (el) { el.textContent = msg; el.className = 'mp-status error'; }
+    };
+
     // Player 1
     this.inventory = new Inventory(36);
     this.player = new Player(this.camera, this.world, P1_KEYS, 0);
@@ -134,6 +152,13 @@ class Game {
     // Start screen buttons
     document.getElementById('play-btn').addEventListener('click', () => this.start(false));
     document.getElementById('coop-btn').addEventListener('click', () => this.start(true));
+
+    // Multiplayer buttons
+    document.getElementById('host-btn').addEventListener('click', () => this._hostGame());
+    document.getElementById('join-btn').addEventListener('click', () => this._joinGame());
+    document.getElementById('join-code').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') this._joinGame();
+    });
   }
 
   _initPlayer2() {
@@ -370,6 +395,9 @@ class Game {
     const dropType = bd.drops !== undefined ? bd.drops : blockType;
     this.world.setBlock(blockPos.x, blockPos.y, blockPos.z, BlockType.AIR);
 
+    // Broadcast block break to network
+    this.network.sendBlockChange(blockPos.x, blockPos.y, blockPos.z, BlockType.AIR);
+
     // Particles + sound
     SoundFX.blockBreak();
     this.particles.spawnBlockBreak(blockPos.x, blockPos.y, blockPos.z, bd.topColor || bd.color);
@@ -529,6 +557,10 @@ class Game {
     if (this.world.getBlock(px, py, pz) !== BlockType.AIR) return;
 
     this.world.setBlock(px, py, pz, placeType);
+
+    // Broadcast block place to network
+    this.network.sendBlockChange(px, py, pz, placeType);
+
     SoundFX.blockPlace();
     if (!player.creativeMode) {
       inventory.useHeldItem();
@@ -991,8 +1023,53 @@ class Game {
     }
   }
 
-  start(coop) {
+  // ── Multiplayer: Host a room ──────────────────────────────
+  _hostGame() {
+    const statusEl = document.getElementById('mp-status');
+    statusEl.textContent = 'Creating room...';
+    statusEl.className = 'mp-status';
+
+    this.network.onReady = (code) => {
+      statusEl.textContent = `Room code: ${code.toUpperCase()} — waiting for players...`;
+      // Start the game as host
+      this.start(false, true);
+    };
+
+    this.network.host();
+  }
+
+  // ── Multiplayer: Join a room ──────────────────────────────
+  _joinGame() {
+    const codeInput = document.getElementById('join-code');
+    const code = codeInput.value.trim().toLowerCase();
+    if (!code || code.length < 3) {
+      const statusEl = document.getElementById('mp-status');
+      statusEl.textContent = 'Enter a room code';
+      statusEl.className = 'mp-status error';
+      return;
+    }
+
+    const statusEl = document.getElementById('mp-status');
+    statusEl.textContent = 'Connecting...';
+    statusEl.className = 'mp-status';
+
+    this.network.onConnected = (seed) => {
+      // Rebuild world with host's seed
+      if (seed !== undefined && seed !== this.seed) {
+        this.seed = seed;
+        this.world.dispose();
+        this.world = new World(this.scene, this.seed);
+        this.player.world = this.world;
+      }
+      this.start(false, true);
+    };
+
+    this.network.join(code);
+  }
+
+  start(coop, multiplayer) {
     this.coopMode = coop;
+    this.multiplayerMode = !!multiplayer;
     document.getElementById('start-screen').style.display = 'none';
     this.running = true;
 
@@ -1000,6 +1077,11 @@ class Game {
     if (!this.touch.isMobile) {
       this.renderer.domElement.requestPointerLock();
     }
+
+    // Init and play background music
+    BGM.init().then(() => {
+      BGM.play();
+    });
 
     const spawn = this.world.getSpawnPoint();
     this.player.spawn(spawn);
@@ -1029,6 +1111,19 @@ class Game {
     this.ui.show();
     this.ui.updateHotbar();
     this.ui.updateHealth(this.player.health);
+
+    // Show room code HUD if multiplayer
+    if (this.multiplayerMode && this.network.roomCode) {
+      const rcDisplay = document.getElementById('room-code-display');
+      const rcText = document.getElementById('room-code-text');
+      const pcText = document.getElementById('player-count');
+      rcDisplay.style.display = 'flex';
+      rcText.textContent = 'Room: ' + this.network.roomCode.toUpperCase();
+      pcText.textContent = '👤 ' + this.network.getPlayerCount();
+      // Keep player count updated
+      this.network.onPlayerJoin = () => { pcText.textContent = '👤 ' + this.network.getPlayerCount(); };
+      this.network.onPlayerLeave = () => { pcText.textContent = '👤 ' + this.network.getPlayerCount(); };
+    }
 
     // Show touch controls on mobile
     this.touch.show();
@@ -1097,6 +1192,9 @@ class Game {
       this.player2.characterModel.setHeldItem(this.inventory2.getHeldSlot());
       this._handleGamepadActions(this.player2, this.inventory2, this.ui2);
     }
+
+    // Multiplayer networking — send & receive player states
+    this.network.update(dt, this.player);
 
     // Day/night
     this.dayNight.update(dt);
