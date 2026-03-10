@@ -91,10 +91,23 @@ canvas {
 .coop-mode #time-display {
   left: 8px;
   right: auto;
+  top: auto;
+  bottom: 8px;
+  /* Move to bottom so it doesn't overlap debug info */
 }
 
 .coop-mode #debug-info {
   left: 8px;
+}
+
+.coop-mode .minimap {
+  right: auto;
+  left: 8px;
+  display: block;
+  /* Show minimap on P1 screen */
+  top: auto;
+  bottom: 40px;
+  /* Put it above the time display */
 }
 
 .coop-mode #inventory-screen {
@@ -125,7 +138,9 @@ canvas {
   display: none;
 }
 
-.p2-crosshair.active { display: block; }
+.p2-crosshair.active {
+  display: block;
+}
 
 .p2-hotbar {
   position: fixed;
@@ -137,7 +152,9 @@ canvas {
   z-index: 100;
 }
 
-.p2-hotbar.active { display: flex; }
+.p2-hotbar.active {
+  display: flex;
+}
 
 .p2-health-bar {
   position: fixed;
@@ -149,7 +166,9 @@ canvas {
   z-index: 100;
 }
 
-.p2-health-bar.active { display: flex; }
+.p2-health-bar.active {
+  display: flex;
+}
 
 .p2-time-display {
   position: fixed;
@@ -165,7 +184,9 @@ canvas {
   border-radius: 4px;
 }
 
-.p2-time-display.active { display: block; }
+.p2-time-display.active {
+  display: block;
+}
 
 .p2-debug-info {
   position: fixed;
@@ -179,7 +200,9 @@ canvas {
   line-height: 1.4;
 }
 
-.p2-debug-info.active { display: block; }
+.p2-debug-info.active {
+  display: block;
+}
 
 .p2-inventory-screen {
   position: fixed;
@@ -196,7 +219,9 @@ canvas {
   pointer-events: auto;
 }
 
-.p2-inventory-screen.hidden { display: none; }
+.p2-inventory-screen.hidden {
+  display: none;
+}
 
 /* ===== Start screen buttons ===== */
 .start-buttons {
@@ -219,6 +244,100 @@ canvas {
 
 #coop-btn:hover {
   background: #55a;
+}
+
+/* Multiplayer section on start screen */
+.mp-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  margin-bottom: 20px;
+  pointer-events: auto;
+}
+
+.mp-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+#host-btn {
+  padding: 10px 30px;
+  font-size: 17px;
+  font-family: 'Courier New', monospace;
+  background: #a64d2c;
+  color: #fff;
+  border: 3px solid #d4774a;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+#host-btn:hover {
+  background: #c0623a;
+}
+
+#join-code {
+  width: 120px;
+  padding: 8px 12px;
+  font-size: 18px;
+  font-family: 'Courier New', monospace;
+  text-align: center;
+  text-transform: lowercase;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border: 2px solid #666;
+  outline: none;
+  letter-spacing: 3px;
+}
+
+#join-code:focus {
+  border-color: #aaa;
+}
+
+#join-btn {
+  padding: 8px 20px;
+  font-size: 17px;
+  font-family: 'Courier New', monospace;
+  background: #2c6ea6;
+  color: #fff;
+  border: 3px solid #4a8ed4;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+#join-btn:hover {
+  background: #3a82c0;
+}
+
+.mp-status {
+  font-size: 14px;
+  color: #ccc;
+  min-height: 20px;
+  text-align: center;
+}
+
+.mp-status.error {
+  color: #f66;
+}
+
+/* Room code in-game display */
+.room-code-display {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 14px;
+  color: #fff;
+  text-shadow: 1px 1px 2px #000;
+  z-index: 100;
+  padding: 4px 14px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  pointer-events: none;
+  display: flex;
+  gap: 12px;
 }
 
 /* Crosshair */
@@ -311,7 +430,8 @@ canvas {
 }
 
 /* Hunger Bar */
-#hunger-bar, .p2-hunger-bar {
+#hunger-bar,
+.p2-hunger-bar {
   position: fixed;
   bottom: 68px;
   left: 50%;
@@ -321,7 +441,8 @@ canvas {
   z-index: 100;
 }
 
-#hunger-bar.active, .p2-hunger-bar.active {
+#hunger-bar.active,
+.p2-hunger-bar.active {
   display: flex;
 }
 
@@ -334,11 +455,11 @@ canvas {
 }
 
 .p2-hunger-bar {
-  left: 75%;
+  left: calc(75% + 85px);
 }
 
 .coop-mode #hunger-bar {
-  left: 25%;
+  left: calc(25% + 85px);
 }
 
 /* Durability bar under tools */
@@ -695,33 +816,41 @@ canvas {
 
 .weather-overlay.rain {
   display: block;
-  background: repeating-linear-gradient(
-    transparent,
-    transparent 4px,
-    rgba(150, 180, 255, 0.08) 4px,
-    rgba(150, 180, 255, 0.08) 5px
-  );
+  background: repeating-linear-gradient(transparent,
+      transparent 4px,
+      rgba(150, 180, 255, 0.08) 4px,
+      rgba(150, 180, 255, 0.08) 5px);
   animation: rain-fall 0.3s linear infinite;
 }
 
 .weather-overlay.snow {
   display: block;
   background: radial-gradient(1px 1px at 20px 30px, rgba(255, 255, 255, 0.6), transparent),
-              radial-gradient(1px 1px at 40px 70px, rgba(255, 255, 255, 0.5), transparent),
-              radial-gradient(1px 1px at 60px 15px, rgba(255, 255, 255, 0.4), transparent),
-              radial-gradient(1px 1px at 80px 45px, rgba(255, 255, 255, 0.5), transparent);
+    radial-gradient(1px 1px at 40px 70px, rgba(255, 255, 255, 0.5), transparent),
+    radial-gradient(1px 1px at 60px 15px, rgba(255, 255, 255, 0.4), transparent),
+    radial-gradient(1px 1px at 80px 45px, rgba(255, 255, 255, 0.5), transparent);
   background-size: 100px 100px;
   animation: snow-fall 3s linear infinite;
 }
 
 @keyframes rain-fall {
-  from { background-position: 0 0; }
-  to { background-position: 0 20px; }
+  from {
+    background-position: 0 0;
+  }
+
+  to {
+    background-position: 0 20px;
+  }
 }
 
 @keyframes snow-fall {
-  from { background-position: 0 0; }
-  to { background-position: 20px 100px; }
+  from {
+    background-position: 0 0;
+  }
+
+  to {
+    background-position: 20px 100px;
+  }
 }
 
 /* Block break progress bar */
@@ -732,11 +861,12 @@ canvas {
   transform: translateX(-50%);
   width: 120px;
   height: 6px;
-  background: rgba(0,0,0,0.6);
-  border: 1px solid rgba(255,255,255,0.3);
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   z-index: 100;
   pointer-events: none;
 }
+
 .break-progress-fill {
   height: 100%;
   width: 0%;
@@ -751,7 +881,7 @@ canvas {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0,0,0,0.85);
+  background: rgba(0, 0, 0, 0.85);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -759,9 +889,11 @@ canvas {
   z-index: 200;
   pointer-events: auto;
 }
+
 .trade-screen.hidden {
   display: none;
 }
+
 .trade-list {
   display: flex;
   flex-direction: column;
@@ -769,29 +901,33 @@ canvas {
   max-height: 320px;
   overflow-y: auto;
   padding: 10px;
-  background: rgba(60,60,60,0.9);
+  background: rgba(60, 60, 60, 0.9);
   border: 2px solid #666;
   min-width: 340px;
 }
+
 .trade-row {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 6px 10px;
-  background: rgba(80,80,80,0.7);
+  background: rgba(80, 80, 80, 0.7);
   border: 1px solid #555;
   cursor: pointer;
   font-size: 14px;
   color: #ddd;
 }
+
 .trade-row:hover {
-  background: rgba(100,120,100,0.8);
+  background: rgba(100, 120, 100, 0.8);
   border-color: #8a8;
 }
+
 .trade-row.disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
 .trade-arrow {
   color: #aaa;
   font-size: 18px;
@@ -926,13 +1062,24 @@ canvas {
 }
 
 /* Desktop / Mobile conditional visibility */
-.desktop-only { display: block; }
-.mobile-only { display: none; }
+.desktop-only {
+  display: block;
+}
+
+.mobile-only {
+  display: none;
+}
 
 /* ===== Mobile responsive overrides ===== */
-@media (max-width: 900px), (hover: none) and (pointer: coarse) {
-  .desktop-only { display: none !important; }
-  .mobile-only { display: block !important; }
+@media (max-width: 900px),
+(hover: none) and (pointer: coarse) {
+  .desktop-only {
+    display: none !important;
+  }
+
+  .mobile-only {
+    display: block !important;
+  }
 
   #start-screen h1 {
     font-size: 36px;
@@ -942,7 +1089,8 @@ canvas {
     font-size: 14px;
   }
 
-  #play-btn, #coop-btn {
+  #play-btn,
+  #coop-btn {
     padding: 12px 24px;
     font-size: 16px;
   }
