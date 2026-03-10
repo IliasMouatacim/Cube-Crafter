@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="screen-orientation" content="landscape" />
+  <title>VoxelCraft</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+
+<body>
+  <div id="app">
+    <!-- Water overlays -->
+    <div id="water-overlay"></div>
+    <div id="water-overlay-p2"></div>
+
+    <!-- Weather overlay -->
+    <div id="weather-overlay" class="weather-overlay"></div>
+
+    <!-- Split screen divider -->
+    <div id="split-divider"></div>
+
+    <!-- P1 HUD (left side in co-op) -->
+    <div id="crosshair">+</div>
+    <div id="hotbar"></div>
+    <div id="health-bar"></div>
+    <div id="hunger-bar"></div>
+    <div id="time-display"></div>
+    <div id="debug-info"></div>
+
+    <!-- P1 Inventory overlay -->
+    <div id="inventory-screen" class="hidden">
+      <div id="armor-slots" class="armor-slots"></div>
+      <div id="inventory-grid"></div>
+      <div id="crafting-area">
+        <div id="crafting-grid"></div>
+        <div id="crafting-arrow">➡</div>
+        <div id="crafting-output"></div>
+      </div>
+    </div>
+
+    <!-- P1 Furnace screen -->
+    <div id="furnace-screen" class="hidden furnace-screen">
+      <h3 style="color:#fff;margin-bottom:10px;">Furnace</h3>
+      <div class="furnace-layout">
+        <div class="furnace-input inv-slot" title="Input"></div>
+        <div class="furnace-fire">🔥</div>
+        <div class="furnace-fuel inv-slot" title="Fuel"></div>
+        <div class="furnace-arrow">
+          <div class="furnace-progress"></div>
+          ➡
+        </div>
+        <div class="furnace-output inv-slot" title="Output"></div>
+      </div>
+      <p style="color:#888;font-size:12px;margin-top:10px;">Press F to close</p>
+    </div>
+
+    <!-- Minimap -->
+    <div id="minimap" class="minimap">
+      <canvas width="80" height="80"></canvas>
+    </div>
+
+    <!-- Block break progress bar -->
+    <div id="break-progress" class="break-progress" style="display:none;">
+      <div class="break-progress-fill"></div>
+    </div>
+
+    <!-- NPC Trade screen -->
+    <div id="trade-screen" class="hidden trade-screen">
+      <h3 style="color:#fff;margin-bottom:10px;">🏪 Village Trader</h3>
+      <div id="trade-list" class="trade-list"></div>
+      <p style="color:#888;font-size:12px;margin-top:10px;">Click to trade | Press T or Esc to close</p>
+    </div>
+
+    <!-- P2 HUD (right side, hidden until co-op) -->
+    <div id="p2-hud" style="display:none;">
+      <div id="p2-crosshair" class="p2-crosshair">+</div>
+      <div id="p2-hotbar" class="p2-hotbar"></div>
+      <div id="p2-health-bar" class="p2-health-bar"></div>
+      <div id="p2-hunger-bar" class="p2-hunger-bar"></div>
+      <div id="p2-time-display" class="p2-time-display"></div>
+      <div id="p2-debug-info" class="p2-debug-info"></div>
+
+      <!-- P2 Inventory overlay -->
+      <div id="p2-inventory-screen" class="hidden p2-inventory-screen">
+        <div id="p2-inventory-grid"></div>
+        <div id="p2-crafting-area" class="p2-crafting-area">
+          <div id="p2-crafting-grid"></div>
+          <div class="p2-crafting-arrow">➡</div>
+          <div id="p2-crafting-output"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Start screen -->
+    <div id="start-screen">
+      <h1>VoxelCraft</h1>
+      <p>A Minecraft-like Voxel Sandbox</p>
+      <div class="start-buttons">
+        <button id="play-btn">Solo Play</button>
+        <button id="coop-btn">Split-Screen Co-op</button>
+      </div>
+      <div class="controls-help desktop-only">
+        <p><strong>Player 1:</strong> WASD - Move | Space - Jump | Shift - Sprint</p>
+        <p>Mouse Look | Left Click - Break/Attack | Right Click - Place/Interact</p>
+        <p>E - Inventory | 1-9 - Hotbar | Q - Drop | V - Toggle Camera</p>
+        <p>R - Equip Armor | G - Creative Mode | F - Close Furnace</p>
+        <hr style="border-color:#444; margin:8px 0;">
+        <p><strong>Player 2:</strong> Arrow Keys - Move | Numpad 0 - Jump | R-Shift - Sprint</p>
+        <p>IJKL - Look | U - Break/Attack | O - Place</p>
+        <p>P - Inventory | Numpad 1-9 - Hotbar</p>
+      </div>
+      <div class="controls-help mobile-only">
+        <p>Left side: Move joystick</p>
+        <p>Right side: Look around</p>
+        <p>Buttons: Jump, Mine, Place, Inventory</p>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+
+</html>
