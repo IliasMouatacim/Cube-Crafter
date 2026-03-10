@@ -199,8 +199,8 @@ export const BGM = {
     if (bgmBuffer) return;
     try {
       const ctx = _getCtx();
-      // Fetch public domain background music (Kevin MacLeod - Wallpaper)
-      const res = await fetch('https://en.wikipedia.org/wiki/Special:FilePath/Kevin_MacLeod_-_Wallpaper.ogg');
+      // Fetch background music from the local public directory
+      const res = await fetch('/bgm.mp3');
       const arrayBuffer = await res.arrayBuffer();
       bgmBuffer = await ctx.decodeAudioData(arrayBuffer);
 
