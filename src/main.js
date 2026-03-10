@@ -82,11 +82,11 @@ class Game {
     this.materials = {
       solid: new THREE.MeshLambertMaterial({
         map: atlasTexture,
-        vertexColors: true,
+        color: 0xffffff,
       }),
       water: new THREE.MeshLambertMaterial({
         map: atlasTexture,
-        vertexColors: true,
+        color: 0xffffff,
         transparent: true,
         opacity: 0.6,
         side: THREE.DoubleSide,

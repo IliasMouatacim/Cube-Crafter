@@ -217,7 +217,6 @@ export class Chunk {
 
               pArr.push(wx + cx, ly + cy, wz + cz);
               nArr.push(face.dir[0], face.dir[1], face.dir[2]);
-              cArr.push(_tmpColor.r, _tmpColor.g, _tmpColor.b);
 
               const finalU = uOffset + baseUv[0] * (1 / 16);
               const finalV = vOffset + baseUv[1] * (1 / 16);
@@ -241,11 +240,10 @@ export class Chunk {
       const geom = new THREE.BufferGeometry();
       geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
       geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-      geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
       geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
       geom.setIndex(indices);
 
-      let mat = materials ? materials.solid : new THREE.MeshLambertMaterial({ vertexColors: true });
+      let mat = materials ? materials.solid : new THREE.MeshLambertMaterial();
       this.mesh = new THREE.Mesh(geom, mat);
       this.mesh.userData.isChunk = true;
       scene.add(this.mesh);
@@ -256,12 +254,10 @@ export class Chunk {
       const geom = new THREE.BufferGeometry();
       geom.setAttribute('position', new THREE.Float32BufferAttribute(waterPositions, 3));
       geom.setAttribute('normal', new THREE.Float32BufferAttribute(waterNormals, 3));
-      geom.setAttribute('color', new THREE.Float32BufferAttribute(waterColors, 3));
       geom.setAttribute('uv', new THREE.Float32BufferAttribute(waterUvs, 2));
       geom.setIndex(waterIndices);
 
       let mat = materials ? materials.water : new THREE.MeshLambertMaterial({
-        vertexColors: true,
         transparent: true,
         opacity: 0.6,
         side: THREE.DoubleSide,
