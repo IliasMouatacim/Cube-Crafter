@@ -359,6 +359,7 @@ export class Player {
 
     // Update 3D character model (before camera, so model is positioned first)
     const moving = _moveDir.lengthSq() > 0.01;
+    this._lastMoving = moving;
     this.characterModel.update(
       dt, this.position, this.facingYaw, this.pitch,
       moving, this.sprinting, this.inWater, this.onGround

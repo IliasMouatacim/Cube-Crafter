@@ -20,13 +20,16 @@ export class World {
     // Queue-based chunk loading for smooth frame rate
     this.loadQueue = [];
     this.meshQueue = [];
-    this.maxChunkLoadsPerFrame = 4;
-    this.maxMeshBuildsPerFrame = 3;
+    this.maxChunkLoadsPerFrame = 2; // Reduced to reduce frame drops
+    this.maxMeshBuildsPerFrame = 1; // Reduced from 3 to 1 to prevent lag spikes
 
     // Fluid simulation sets containing world coordinates "wx,wy,wz"
     this.fluidQueue = new Set();
     this.nextFluidQueue = new Set();
     this.tickCount = 0;
+
+    // Cache player chunks to avoid rebuilding set every frame
+    this.lastPlayerChunks = [];
 
     // Door open/closed states: key "x,y,z" -> true (open)
     this.doorStates = new Map();
@@ -160,41 +163,60 @@ export class World {
   // Update chunk loading based on player position(s)
   // Accepts optional extra positions for co-op
   update(playerX, playerZ, extraPositions) {
-    // Determine which chunks should be loaded
-    const neededChunks = new Set();
-
     // Gather all player positions to load around
     const positions = [{ x: playerX, z: playerZ }];
     if (extraPositions) {
       for (const p of extraPositions) positions.push(p);
     }
 
-    for (const pos of positions) {
-      const pcx = Math.floor(pos.x / CHUNK_SIZE);
-      const pcz = Math.floor(pos.z / CHUNK_SIZE);
-
-      for (let dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; dx++) {
-        for (let dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; dz++) {
-          if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) continue;
-          const cx = pcx + dx;
-          const cz = pcz + dz;
-          const key = this.chunkKey(cx, cz);
-          neededChunks.add(key);
-
-          if (!this.chunks.has(key)) {
-            const chunk = new Chunk(cx, cz, this);
-            this.chunks.set(key, chunk);
-            this.loadQueue.push(chunk);
-          }
+    // Check if players have moved to new chunks
+    let chunksChanged = false;
+    if (this.lastPlayerChunks.length !== positions.length) {
+      chunksChanged = true;
+    } else {
+      for (let i = 0; i < positions.length; i++) {
+        const pcx = Math.floor(positions[i].x / CHUNK_SIZE);
+        const pcz = Math.floor(positions[i].z / CHUNK_SIZE);
+        if (this.lastPlayerChunks[i].cx !== pcx || this.lastPlayerChunks[i].cz !== pcz) {
+          chunksChanged = true;
+          break;
         }
       }
     }
 
-    // Unload distant chunks
-    for (const [key, chunk] of this.chunks) {
-      if (!neededChunks.has(key)) {
-        chunk.dispose(this.scene);
-        this.chunks.delete(key);
+    if (chunksChanged) {
+      // Determine which chunks should be loaded
+      const neededChunks = new Set();
+      this.lastPlayerChunks = [];
+
+      for (const pos of positions) {
+        const pcx = Math.floor(pos.x / CHUNK_SIZE);
+        const pcz = Math.floor(pos.z / CHUNK_SIZE);
+        this.lastPlayerChunks.push({ cx: pcx, cz: pcz });
+
+        for (let dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; dx++) {
+          for (let dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; dz++) {
+            if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) continue;
+            const cx = pcx + dx;
+            const cz = pcz + dz;
+            const key = this.chunkKey(cx, cz);
+            neededChunks.add(key);
+
+            if (!this.chunks.has(key)) {
+              const chunk = new Chunk(cx, cz, this);
+              this.chunks.set(key, chunk);
+              this.loadQueue.push(chunk);
+            }
+          }
+        }
+      }
+
+      // Unload distant chunks
+      for (const [key, chunk] of this.chunks) {
+        if (!neededChunks.has(key)) {
+          chunk.dispose(this.scene);
+          this.chunks.delete(key);
+        }
       }
     }
 

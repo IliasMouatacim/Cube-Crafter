@@ -9,8 +9,8 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="screen-orientation" content="landscape" />
   <title>VoxelCraft</title>
-  <script type="module" crossorigin src="/assets/index-Ctt7Jomv.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BsCHhjiT.css">
+  <script type="module" crossorigin src="/assets/index-Dycuzed3.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-qKZcnKEY.css">
 </head>
 
 <body>
@@ -70,6 +70,12 @@
       <div class="break-progress-fill"></div>
     </div>
 
+    <!-- Multiplayer room code display -->
+    <div id="room-code-display" class="room-code-display" style="display:none;">
+      <span id="room-code-text"></span>
+      <span id="player-count"></span>
+    </div>
+
     <!-- NPC Trade screen -->
     <div id="trade-screen" class="hidden trade-screen">
       <h3 style="color:#fff;margin-bottom:10px;">🏪 Village Trader</h3>
@@ -104,6 +110,16 @@
       <div class="start-buttons">
         <button id="play-btn">Solo Play</button>
         <button id="coop-btn">Split-Screen Co-op</button>
+      </div>
+      <div class="mp-section">
+        <div class="mp-row">
+          <button id="host-btn">Host Online Game</button>
+        </div>
+        <div class="mp-row">
+          <input id="join-code" type="text" placeholder="Room code" maxlength="5" autocomplete="off" spellcheck="false" />
+          <button id="join-btn">Join</button>
+        </div>
+        <div id="mp-status" class="mp-status"></div>
       </div>
       <div class="controls-help desktop-only">
         <p><strong>Player 1:</strong> WASD - Move | Space - Jump | Shift - Sprint</p>

@@ -1285,7 +1285,9 @@ class Game {
     this.world.update(this.player.position.x, this.player.position.z, extraPos);
 
     // NPC spawning: check nearby village chunks
-    this._trySpawnVillageNPCs();
+    if (this.frameCount === 0) {
+      this._trySpawnVillageNPCs();
+    }
 
     // Update P1 UI
     this.ui.updateHealth(this.player.health);
