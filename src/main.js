@@ -1177,9 +1177,12 @@ class Game {
       this.touch.applyToPlayer(this.player);
     }
 
-    // Update P1
+    // Update P1 — always poll gamepad (needed for inventory toggle) but skip physics when inventory open
     if (!this.ui.inventoryOpen && !this.tradeOpen) {
       this.player.update(dt);
+    } else {
+      // Still poll gamepad so buttons like RB (inventory close) are detected
+      this.player._pollGamepad(dt);
     }
     // Sync held item visual on character model
     this.player.characterModel.setHeldItem(this.inventory.getHeldSlot());
@@ -1202,6 +1205,9 @@ class Game {
     if (this.coopMode && this.player2) {
       if (!this.ui2.inventoryOpen) {
         this.player2.update(dt);
+      } else {
+        // Still poll gamepad so inventory can be closed
+        this.player2._pollGamepad(dt);
       }
       this.player2.characterModel.setHeldItem(this.inventory2.getHeldSlot());
       this._handleGamepadActions(this.player2, this.inventory2, this.ui2);
@@ -1351,8 +1357,11 @@ class Game {
       this.renderer.setScissor(hw, 0, w - hw, h);
       this.renderer.render(this.scene, this.camera2);
     } else {
-      // Solo: show full character in 3rd person, hide head in 1st person
-      this.player.characterModel.setFirstPerson(!this.player.thirdPerson);
+      // Solo: In 3rd person show full character (head visible).
+      // In 1st person (V key) hide head to avoid it blocking the camera.
+      // Always explicitly set to avoid stale state from previous frames.
+      const hideHead = !this.player.thirdPerson;
+      this.player.characterModel.setFirstPerson(hideHead);
       this.renderer.render(this.scene, this.camera);
     }
   }
