@@ -212,39 +212,44 @@ class Game {
       this.renderer.setSize(w, h);
     });
 
-    // Pointer lock (P1 mouse)
+    // Pointer lock (Keyboard player mouse)
     document.addEventListener('pointerlockchange', () => {
-      this.player.mouseLocked = !!document.pointerLockElement;
+      const p = (this.coopMode && this.player2) ? this.player2 : this.player;
+      p.mouseLocked = !!document.pointerLockElement;
     });
 
-    // Mouse buttons: P1 break (left) and place (right) — desktop only
+    // Mouse buttons: Break (left) and place (right) — desktop only
     document.addEventListener('mousedown', (e) => {
       if (!this.running || this.touch.isMobile) return;
 
       // Close trade screen on click outside
       if (this.tradeOpen) return;
 
+      const p = (this.coopMode && this.player2) ? this.player2 : this.player;
+      const inv = (this.coopMode && this.inventory2) ? this.inventory2 : this.inventory;
+      const ui = (this.coopMode && this.ui2) ? this.ui2 : this.ui;
+
       // Re-lock pointer if lost (e.g. tabbed out and came back)
-      if (!this.player.mouseLocked && !this.ui.inventoryOpen) {
+      if (!p.mouseLocked && !ui.inventoryOpen) {
         this.renderer.domElement.requestPointerLock();
         return;
       }
 
-      if (!this.player.mouseLocked) return;
+      if (!p.mouseLocked) return;
 
       if (e.button === 0) {
         // Trigger punch animation
-        this.player.characterModel.triggerPunch();
+        p.characterModel.triggerPunch();
         SoundFX.hit();
         // Use player position (not camera) for attack origin
-        const attackOrigin = this.player.position.clone();
+        const attackOrigin = p.position.clone();
         attackOrigin.y += 1.5;
-        _tmpDir.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
+        _tmpDir.set(0, 0, -1).applyQuaternion(p.camera.quaternion);
 
         // Check if holding bow — shoot arrow
-        const heldSlot = this.inventory.getHeldSlot();
+        const heldSlot = inv.getHeldSlot();
         if (heldSlot && !heldSlot.isBlock && ItemData[heldSlot.id] && ItemData[heldSlot.id].toolType === ToolType.BOW) {
-          this._shootBow(this.player, this.inventory, this.ui);
+          this._shootBow(p, inv, ui);
           return;
         }
 
@@ -253,13 +258,13 @@ class Game {
         const hitMob = this.mobs.playerAttack(attackOrigin, _tmpDir, damage);
         if (hitMob) {
           // Damage weapon on hit
-          this.inventory.damageHeldTool();
+          inv.damageHeldTool();
         } else {
           // Start progressive mining
           this.breaking = true;
         }
       } else if (e.button === 2) {
-        this._handleRightClick(this.player, this.inventory, this.ui);
+        this._handleRightClick(p, inv, ui);
         this.placing = true;
         this._placeCooldown = 0.25; // initial place already happened
       }
@@ -284,8 +289,12 @@ class Game {
     document.addEventListener('keydown', (e) => {
       if (!this.running) return;
 
+      const p = (this.coopMode && this.player2) ? this.player2 : this.player;
+      const inv = (this.coopMode && this.inventory2) ? this.inventory2 : this.inventory;
+      const ui = (this.coopMode && this.ui2) ? this.ui2 : this.ui;
+
       // Cheat code detection — typed letters while playing
-      if (!this.ui.inventoryOpen && !this.tradeOpen && e.key.length === 1 && /^[a-z]$/i.test(e.key)) {
+      if (!ui.inventoryOpen && !this.tradeOpen && e.key.length === 1 && /^[a-z]$/i.test(e.key)) {
         this._cheatBuffer += e.key.toLowerCase();
         this._cheatTimer = 1.5; // reset timeout
         // Keep buffer trimmed to max cheat length
@@ -302,19 +311,19 @@ class Game {
         }
       }
 
-      // P1: Number keys for hotbar
+      // Number keys for hotbar
       if (e.code >= 'Digit1' && e.code <= 'Digit9') {
         const slot = parseInt(e.code.replace('Digit', '')) - 1;
-        this.inventory.selectSlot(slot);
-        this.ui.updateHotbar();
+        inv.selectSlot(slot);
+        ui.updateHotbar();
       }
 
-      // P1: E = inventory toggle
+      // E = inventory toggle
       if (e.code === 'KeyE') {
-        const isOpen = this.ui.toggleInventory();
+        const isOpen = ui.toggleInventory();
         if (isOpen) {
           document.exitPointerLock();
-          this.player.mouseLocked = false;
+          p.mouseLocked = false;
         } else {
           this.renderer.domElement.requestPointerLock();
         }
@@ -323,37 +332,38 @@ class Game {
       // F3 = debug toggle
       if (e.code === 'F3') {
         e.preventDefault();
-        this.ui.toggleDebug();
-        if (this.ui2) this.ui2.toggleDebug();
+        ui.toggleDebug();
+        if (this.coopMode && this.ui2 && ui === this.ui) this.ui2.toggleDebug();
+        else if (this.coopMode && this.ui && ui === this.ui2) this.ui.toggleDebug();
       }
 
-      // P1: Q = drop item
+      // Q = drop item
       if (e.code === 'KeyQ') {
-        this.inventory.dropHeldItem();
-        this.ui.updateHotbar();
+        inv.dropHeldItem();
+        ui.updateHotbar();
       }
 
       // G = toggle creative mode
       if (e.code === 'KeyG') {
-        this.player.creativeMode = !this.player.creativeMode;
-        if (this.player.creativeMode) {
-          this.player.health = this.player.maxHealth;
-          this.player.hunger = this.player.maxHunger;
+        p.creativeMode = !p.creativeMode;
+        if (p.creativeMode) {
+          p.health = p.maxHealth;
+          p.hunger = p.maxHunger;
         }
       }
 
       // R = equip held armor
       if (e.code === 'KeyR') {
-        const equipped = this.inventory.equipArmor(this.inventory.selectedSlot, this.player.armorSlots);
+        const equipped = inv.equipArmor(inv.selectedSlot, p.armorSlots);
         if (equipped) {
-          this.ui.updateHotbar();
-          this.ui.updateArmorSlots(this.player.armorSlots);
+          ui.updateHotbar();
+          ui.updateArmorSlots(p.armorSlots);
         }
       }
 
       // F = close furnace if open
-      if (e.code === 'KeyF' && this.ui.furnaceOpen) {
-        this.ui.toggleFurnace();
+      if (e.code === 'KeyF' && ui.furnaceOpen) {
+        ui.toggleFurnace();
         this.renderer.domElement.requestPointerLock();
       }
 
@@ -361,51 +371,23 @@ class Game {
       if (e.code === 'KeyT' || (e.code === 'Escape' && this.tradeOpen)) {
         if (this.tradeOpen) {
           this._closeTrade();
-        } else if (e.code === 'KeyT' && this._checkNPCInteraction()) {
+        } else if (e.code === 'KeyT' && this._checkNPCInteraction(p)) {
           this._openTrade();
-        }
-      }
-
-      // === P2 controls (co-op) ===
-      if (this.coopMode && this.player2) {
-        // P2: Numpad 1-9 for hotbar
-        if (e.code >= 'Numpad1' && e.code <= 'Numpad9') {
-          const slot = parseInt(e.code.replace('Numpad', '')) - 1;
-          this.inventory2.selectSlot(slot);
-          this.ui2.updateHotbar();
-        }
-
-        // P2: U = break block, O = place block
-        if (e.code === 'KeyU') {
-          this.player2.characterModel.triggerPunch();
-          const attackOrigin2 = this.player2.position.clone();
-          attackOrigin2.y += 1.5;
-          _tmpDir.set(0, 0, -1).applyQuaternion(this.camera2.quaternion);
-          const hitMob2 = this.mobs.playerAttack(attackOrigin2, _tmpDir);
-          if (!hitMob2) {
-            this._breakBlock(this.player2, this.inventory2, this.ui2);
-          }
-        }
-        if (e.code === 'KeyO') {
-          this._placeBlock(this.player2, this.inventory2, this.ui2);
-        }
-
-        // P2: P = inventory toggle
-        if (e.code === 'KeyP') {
-          this.ui2.toggleInventory();
         }
       }
     });
 
-    // Scroll wheel for P1 hotbar
+    // Scroll wheel for hotbar
     document.addEventListener('wheel', (e) => {
-      if (!this.running || this.ui.inventoryOpen) return;
+      const inv = (this.coopMode && this.inventory2) ? this.inventory2 : this.inventory;
+      const ui = (this.coopMode && this.ui2) ? this.ui2 : this.ui;
+      if (!this.running || ui.inventoryOpen) return;
       const dir = e.deltaY > 0 ? 1 : -1;
-      let newSlot = this.inventory.selectedSlot + dir;
-      if (newSlot < 0) newSlot = this.inventory.hotbarSize - 1;
-      if (newSlot >= this.inventory.hotbarSize) newSlot = 0;
-      this.inventory.selectSlot(newSlot);
-      this.ui.updateHotbar();
+      let newSlot = inv.selectedSlot + dir;
+      if (newSlot < 0) newSlot = inv.hotbarSize - 1;
+      if (newSlot >= inv.hotbarSize) newSlot = 0;
+      inv.selectSlot(newSlot);
+      ui.updateHotbar();
     });
   }
 
@@ -436,15 +418,19 @@ class Game {
     ui.updateHotbar();
   }
 
-  // Progressive mining: called every frame while LMB held for P1
+  // Progressive mining: called every frame while LMB held
   _updateMining(dt) {
-    if (!this.breaking || this.ui.inventoryOpen || this.tradeOpen) {
+    const p = (this.coopMode && this.player2) ? this.player2 : this.player;
+    const inv = (this.coopMode && this.inventory2) ? this.inventory2 : this.inventory;
+    const ui = (this.coopMode && this.ui2) ? this.ui2 : this.ui;
+
+    if (!this.breaking || ui.inventoryOpen || this.tradeOpen) {
       this.breakProgress = 0;
       this.breakTarget = null;
       if (this._breakProgressEl) this._breakProgressEl.style.display = 'none';
       return;
     }
-    const tb = this.player.targetBlock;
+    const tb = p.targetBlock;
     if (!tb) {
       this.breakProgress = 0;
       this.breakTarget = null;
@@ -457,8 +443,8 @@ class Game {
     if (!bd || bd.hardness < 0) return;
 
     // Creative = instant break
-    if (this.player.creativeMode) {
-      this._breakBlock(this.player, this.inventory, this.ui);
+    if (p.creativeMode) {
+      this._breakBlock(p, inv, ui);
       return;
     }
 
@@ -470,7 +456,7 @@ class Game {
     }
 
     // Calculate break speed based on tool
-    const heldSlot = this.inventory.getHeldSlot();
+    const heldSlot = inv.getHeldSlot();
     const speed = getMiningSpeed(heldSlot, blockType);
     this.breakProgress += (speed / Math.max(0.05, bd.hardness)) * dt;
 
@@ -489,7 +475,7 @@ class Game {
     }
 
     if (this.breakProgress >= 1.0) {
-      this._breakBlock(this.player, this.inventory, this.ui);
+      this._breakBlock(p, inv, ui);
       this.breakProgress = 0;
       this.breakTarget = null;
       if (this._breakProgressEl) this._breakProgressEl.style.display = 'none';
@@ -497,11 +483,14 @@ class Game {
   }
 
   _updatePlacing(dt) {
-    if (!this.placing || this.ui.inventoryOpen || this.tradeOpen) return;
+    const p = (this.coopMode && this.player2) ? this.player2 : this.player;
+    const inv = (this.coopMode && this.inventory2) ? this.inventory2 : this.inventory;
+    const ui = (this.coopMode && this.ui2) ? this.ui2 : this.ui;
+    if (!this.placing || ui.inventoryOpen || this.tradeOpen) return;
     this._placeCooldown -= dt;
     if (this._placeCooldown > 0) return;
     this._placeCooldown = 0.2; // 200ms between placements
-    this._placeBlock(this.player, this.inventory, this.ui);
+    this._placeBlock(p, inv, ui);
   }
 
   // Right-click handler extracted for reuse
@@ -797,10 +786,11 @@ class Game {
   }
 
   // Check if player is near an NPC and press T
-  _checkNPCInteraction() {
+  _checkNPCInteraction(p) {
+    p = p || this.player;
     for (const mob of this.mobs.mobs) {
       if (!mob.alive || !mob.isNPC) continue;
-      const dist = this.player.position.distanceTo(mob.position);
+      const dist = p.position.distanceTo(mob.position);
       if (dist < 3.5) return true;
     }
     return false;
@@ -1405,7 +1395,7 @@ class Game {
     // Inventory (RB)
     if (player.gpPressed('_gp_inventory')) {
       const isOpen = ui.toggleInventory();
-      if (player === this.player) {
+      if (player.keyBindings && player.keyBindings.useMouse) {
         if (isOpen) {
           document.exitPointerLock();
           player.mouseLocked = false;

@@ -29,8 +29,23 @@ const TP_DISTANCE = 4.0;    // distance behind the player
 const TP_HEIGHT = 1.8;      // height above the player's feet
 const TP_LOOK_HEIGHT = 1.3; // point on the character the camera looks at
 
-// Default key bindings for Player 1 (WASD + mouse)
+// Default key bindings for Player 1 (Controller Only)
 export const P1_KEYS = {
+  forward: null,
+  back: null,
+  left: null,
+  right: null,
+  jump: null,
+  sprint: null,
+  lookUp: null,
+  lookDown: null,
+  lookLeft: null,
+  lookRight: null,
+  useMouse: false,
+};
+
+// Key bindings for Player 2 (WASD + mouse)
+export const P2_KEYS = {
   forward: 'KeyW',
   back: 'KeyS',
   left: 'KeyA',
@@ -42,21 +57,6 @@ export const P1_KEYS = {
   lookLeft: null,
   lookRight: null,
   useMouse: true,
-};
-
-// Key bindings for Player 2 (Arrow keys + IJKL look)
-export const P2_KEYS = {
-  forward: 'ArrowUp',
-  back: 'ArrowDown',
-  left: 'ArrowLeft',
-  right: 'ArrowRight',
-  jump: 'Numpad0',
-  sprint: 'ShiftRight',
-  lookUp: 'KeyI',
-  lookDown: 'KeyK',
-  lookLeft: 'KeyJ',
-  lookRight: 'KeyL',
-  useMouse: false,
 };
 
 export class Player {
