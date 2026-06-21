@@ -1247,10 +1247,14 @@ class Game {
       SoundFX.playerHurt();
     }
 
-    // Collect mob drops
+    // Collect mob drops — give to whichever player is active (P1 in solo, P1+P2 in coop)
     const drops = this.mobs.collectDrops();
     for (const drop of drops) {
-      this.inventory.addItem(drop.id, drop.count);
+      if (drop.isBlock) {
+        this.inventory.addBlock(drop.id, drop.count);
+      } else {
+        this.inventory.addItem(drop.id, drop.count);
+      }
     }
     if (drops.length > 0) {
       SoundFX.pickup();
@@ -1342,17 +1346,17 @@ class Game {
       const hw = Math.floor(w / 2);
 
       // Left viewport: Player 1's view
-      // P1 sees own body (head hidden), P2 fully visible
-      this.player.characterModel.setFirstPerson(true);
+      // Only hide P1's head if P1 is in first-person mode (3rd-person = head visible)
+      this.player.characterModel.setFirstPerson(!this.player.thirdPerson);
       if (this.player2) this.player2.characterModel.setFirstPerson(false);
       this.renderer.setViewport(0, 0, hw, h);
       this.renderer.setScissor(0, 0, hw, h);
       this.renderer.render(this.scene, this.camera);
 
       // Right viewport: Player 2's view
-      // P2 sees own body (head hidden), P1 fully visible
+      // Only hide P2's head if P2 is in first-person mode
       this.player.characterModel.setFirstPerson(false);
-      if (this.player2) this.player2.characterModel.setFirstPerson(true);
+      if (this.player2) this.player2.characterModel.setFirstPerson(!this.player2.thirdPerson);
       this.renderer.setViewport(hw, 0, w - hw, h);
       this.renderer.setScissor(hw, 0, w - hw, h);
       this.renderer.render(this.scene, this.camera2);
