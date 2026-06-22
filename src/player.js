@@ -29,23 +29,8 @@ const TP_DISTANCE = 4.0;    // distance behind the player
 const TP_HEIGHT = 1.8;      // height above the player's feet
 const TP_LOOK_HEIGHT = 1.3; // point on the character the camera looks at
 
-// Default key bindings for Player 1 (Controller Only)
+// Default key bindings for Player 1 (WASD + mouse)
 export const P1_KEYS = {
-  forward: null,
-  back: null,
-  left: null,
-  right: null,
-  jump: null,
-  sprint: null,
-  lookUp: null,
-  lookDown: null,
-  lookLeft: null,
-  lookRight: null,
-  useMouse: false,
-};
-
-// Key bindings for Player 2 (WASD + mouse)
-export const P2_KEYS = {
   forward: 'KeyW',
   back: 'KeyS',
   left: 'KeyA',
@@ -57,6 +42,21 @@ export const P2_KEYS = {
   lookLeft: null,
   lookRight: null,
   useMouse: true,
+};
+
+// Key bindings for Player 2 (Controller Only)
+export const P2_KEYS = {
+  forward: null,
+  back: null,
+  left: null,
+  right: null,
+  jump: null,
+  sprint: null,
+  lookUp: null,
+  lookDown: null,
+  lookLeft: null,
+  lookRight: null,
+  useMouse: false,
 };
 
 export class Player {
@@ -337,9 +337,15 @@ export class Player {
     }
 
     // Fall damage tracking (not in water, not flying)
-    if (!this.inWater && !this.flying && !this.onGround && this.velocity.y < 0 && !this.wasFalling) {
-      this.fallStartY = this.position.y;
-      this.wasFalling = true;
+    if (!this.inWater && !this.flying && !this.onGround) {
+      if (!this.wasFalling) {
+        this.fallMaxY = this.position.y;
+        this.wasFalling = true;
+      } else {
+        if (this.position.y > this.fallMaxY) {
+          this.fallMaxY = this.position.y;
+        }
+      }
     }
 
     // Collision detection & response
@@ -348,7 +354,7 @@ export class Player {
     // Fall damage on landing (cancelled if landing in water)
     if (this.onGround && this.wasFalling) {
       if (!this.inWater) {
-        const fallDist = this.fallStartY - this.position.y;
+        const fallDist = this.fallMaxY - this.position.y;
         if (fallDist > 3) {
           const damage = Math.floor(fallDist - 3);
           this.takeDamage(damage);

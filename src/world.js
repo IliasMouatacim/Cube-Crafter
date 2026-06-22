@@ -33,6 +33,17 @@ export class World {
 
     // Door open/closed states: key "x,y,z" -> true (open)
     this.doorStates = new Map();
+
+    // Player modifications: key "x,y,z" -> BlockType
+    this.modifications = new Map();
+
+    // Chest contents: key "x,y,z" -> array of items
+    this.chests = new Map();
+  }
+
+  saveModification(wx, wy, wz, type) {
+    const key = `${wx},${wy},${wz}`;
+    this.modifications.set(key, type);
   }
 
   chunkKey(cx, cz) {
@@ -151,8 +162,7 @@ export class World {
     // Rebuild the chunk so the visual updates
     const cx = Math.floor(wx / CHUNK_SIZE);
     const cz = Math.floor(wz / CHUNK_SIZE);
-    const chunk = this.getChunk(cx, cz);
-    if (chunk) chunk.dirty = true;
+    this._markDirty(cx, cz);
     this._markDirty(cx - 1, cz);
     this._markDirty(cx + 1, cz);
     this._markDirty(cx, cz - 1);
@@ -267,10 +277,11 @@ export class World {
     if (this.fluidQueue.size === 0) return;
 
     // Swap queues
-    const queue = Array.from(this.fluidQueue);
-    this.fluidQueue.clear();
+    const currentQueue = this.fluidQueue;
+    this.fluidQueue = this.nextFluidQueue;
+    this.nextFluidQueue = currentQueue;
 
-    for (const key of queue) {
+    for (const key of this.nextFluidQueue) {
       const [wx, wy, wz] = key.split(',').map(Number);
       const block = this.getBlock(wx, wy, wz);
 
@@ -344,6 +355,7 @@ export class World {
         }
       }
     }
+    this.nextFluidQueue.clear();
   }
 
   _checkFluidDrying(wx, wy, wz, blockType, meta) {

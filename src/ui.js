@@ -166,10 +166,51 @@ export class UI {
     const invSlot = this.inventory.slots[index];
     if (!invSlot) return;
 
-    // Find first empty crafting slot and move item there
-    for (let i = 0; i < 9; i++) {
+    if (this.chestOpen) {
+      // Simple chest stacking: try to find matching slot
+      for (let i = 0; i < 27; i++) {
+        const cSlot = this.currentChestData[i];
+        if (cSlot && cSlot.id === invSlot.id && cSlot.isBlock === invSlot.isBlock && cSlot.count < 64) {
+          const space = 64 - cSlot.count;
+          const transfer = Math.min(space, invSlot.count);
+          cSlot.count += transfer;
+          this.inventory.removeFromSlot(index, transfer);
+          if (!this.inventory.slots[index]) break;
+        }
+      }
+      // If still have items, find empty slot
+      if (this.inventory.slots[index]) {
+        for (let i = 0; i < 27; i++) {
+          if (!this.currentChestData[i]) {
+            this.currentChestData[i] = { id: invSlot.id, isBlock: invSlot.isBlock, count: this.inventory.slots[index].count };
+            this.inventory.removeFromSlot(index, this.inventory.slots[index].count);
+            break;
+          }
+        }
+      }
+      this.updateChestUI();
+      this.updateAll();
+      return;
+    }
+
+    const allowedSlots = this.isCraftingTableMode ? [0, 1, 2, 3, 4, 5, 6, 7, 8] : [0, 1, 3, 4];
+
+    // Check if we can stack in existing crafting slot
+    for (const i of allowedSlots) {
+      const cSlot = this.inventory.craftingGrid[i];
+      if (cSlot && cSlot.id === invSlot.id && cSlot.isBlock === invSlot.isBlock) {
+        cSlot.count++;
+        this.inventory.removeFromSlot(index, 1);
+        this.inventory._checkCrafting();
+        this.updateAll();
+        return;
+      }
+    }
+
+    // Find first empty crafting slot and move 1 item there
+    for (const i of allowedSlots) {
       if (!this.inventory.craftingGrid[i]) {
-        this.inventory.setCraftingSlot(i, invSlot);
+        this.inventory.setCraftingSlot(i, { id: invSlot.id, isBlock: invSlot.isBlock, count: 1 });
         this.inventory.removeFromSlot(index, 1);
         this.updateAll();
         return;
@@ -182,9 +223,9 @@ export class UI {
     if (slot) {
       // Return item to inventory
       if (slot.isBlock) {
-        this.inventory.addBlock(slot.id, 1);
+        this.inventory.addBlock(slot.id, slot.count);
       } else {
-        this.inventory.addItem(slot.id, 1);
+        this.inventory.addItem(slot.id, slot.count);
       }
       this.inventory.setCraftingSlot(index, null);
       this.updateAll();
@@ -198,11 +239,37 @@ export class UI {
     }
   }
 
-  toggleInventory() {
+  toggleInventory(isCraftingTable = false) {
     if (!this.inventoryScreen) return false;
+    // Don't close if we're switching from chest to inventory, or vice versa
+    if (this.chestOpen) {
+       this.toggleChest(null, null); // Close chest first
+       return false;
+    }
+    
     this.inventoryOpen = !this.inventoryOpen;
     if (this.inventoryOpen) {
+      this.isCraftingTableMode = isCraftingTable;
       this.inventoryScreen.classList.remove('hidden');
+      
+      const gridId = this.prefix === 'p1' ? 'crafting-grid' : 'p2-crafting-grid';
+      const grid = document.getElementById(gridId);
+      if (grid) {
+        if (isCraftingTable) {
+          grid.style.gridTemplateColumns = 'repeat(3, 50px)';
+          Array.from(grid.children).forEach(child => child.style.display = 'flex');
+        } else {
+          grid.style.gridTemplateColumns = 'repeat(2, 50px)';
+          Array.from(grid.children).forEach((child, i) => {
+            if (i === 0 || i === 1 || i === 3 || i === 4) {
+              child.style.display = 'flex';
+            } else {
+              child.style.display = 'none';
+            }
+          });
+        }
+      }
+      
       this.updateAll();
     } else {
       this.inventoryScreen.classList.add('hidden');
@@ -211,15 +278,83 @@ export class UI {
         const slot = this.inventory.craftingGrid[i];
         if (slot) {
           if (slot.isBlock) {
-            this.inventory.addBlock(slot.id, 1);
+            this.inventory.addBlock(slot.id, slot.count);
           } else {
-            this.inventory.addItem(slot.id, 1);
+            this.inventory.addItem(slot.id, slot.count);
           }
           this.inventory.setCraftingSlot(i, null);
         }
       }
     }
     return this.inventoryOpen;
+  }
+
+  toggleChest(chestKey = null, chestData = null) {
+    if (!this.inventoryScreen) return false;
+    this.chestOpen = !!chestKey;
+    if (this.chestOpen) {
+      this.currentChestKey = chestKey;
+      this.currentChestData = chestData;
+      this.inventoryOpen = true;
+      this.inventoryScreen.classList.remove('hidden');
+      
+      const chestGrid = document.getElementById('chest-grid');
+      chestGrid.style.display = 'grid';
+      this.updateChestUI();
+      
+      document.getElementById('armor-slots').style.display = 'none';
+      document.getElementById('crafting-area').style.display = 'none';
+      this.updateAll();
+    } else {
+      this.inventoryOpen = false;
+      this.currentChestKey = null;
+      this.currentChestData = null;
+      this.inventoryScreen.classList.add('hidden');
+      document.getElementById('chest-grid').style.display = 'none';
+      document.getElementById('armor-slots').style.display = 'flex';
+      document.getElementById('crafting-area').style.display = 'flex';
+    }
+    return this.inventoryOpen;
+  }
+
+  updateChestUI() {
+    if (!this.chestOpen) return;
+    const chestGrid = document.getElementById('chest-grid');
+    chestGrid.innerHTML = '';
+    
+    for (let i = 0; i < 27; i++) {
+      const slotDiv = document.createElement('div');
+      slotDiv.className = 'inv-slot';
+      slotDiv.dataset.index = i;
+      slotDiv.onclick = () => this._onChestSlotClick(i);
+      
+      const slot = this.currentChestData[i];
+      if (slot) {
+        const img = document.createElement('img');
+        img.src = slot.isBlock ? `assets/blocks/${slot.id}.png` : `assets/items/${slot.id}.png`;
+        img.className = 'block-icon';
+        img.draggable = false;
+        slotDiv.appendChild(img);
+        if (slot.count > 1) {
+          const countSpan = document.createElement('span');
+          countSpan.className = 'slot-count';
+          countSpan.textContent = slot.count;
+          slotDiv.appendChild(countSpan);
+        }
+      }
+      chestGrid.appendChild(slotDiv);
+    }
+  }
+
+  _onChestSlotClick(index) {
+    const chestSlot = this.currentChestData[index];
+    if (chestSlot) {
+      if (chestSlot.isBlock) this.inventory.addBlock(chestSlot.id, chestSlot.count);
+      else this.inventory.addItem(chestSlot.id, chestSlot.count);
+      this.currentChestData[index] = null;
+      this.updateChestUI();
+      this.updateAll();
+    }
   }
 
   toggleDebug() {

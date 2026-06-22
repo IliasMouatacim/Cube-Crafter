@@ -39,6 +39,26 @@ export class Chunk {
   generate(generator) {
     this.blocks = generator.generateChunkData(this.cx, this.cz);
     this.metadata = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
+    
+    // Apply modifications
+    for (const [key, type] of this.world.modifications.entries()) {
+      const parts = key.split(',');
+      const wx = parseInt(parts[0]);
+      const wy = parseInt(parts[1]);
+      const wz = parseInt(parts[2]);
+      
+      const cx = Math.floor(wx / CHUNK_SIZE);
+      const cz = Math.floor(wz / CHUNK_SIZE);
+      if (cx === this.cx && cz === this.cz) {
+        const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+        const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+        if (wy >= 0 && wy < CHUNK_HEIGHT) {
+          const idx = WorldGenerator.blockIndex(lx, wy, lz);
+          this.blocks[idx] = type;
+        }
+      }
+    }
+
     this.generated = true;
     this.dirty = true;
   }

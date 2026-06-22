@@ -630,6 +630,13 @@ class Mob {
     this.mesh = this._buildMesh();
     this.mesh.position.copy(this.position);
 
+    // Clone materials to prevent shared mutation
+    this.mesh.traverse(c => {
+      if (c.isMesh && c.material) {
+        c.material = c.material.clone();
+      }
+    });
+
     // Name label
     this.label = null;
 
@@ -718,14 +725,18 @@ class Mob {
     if (!mobDrops) return drops;
     for (const drop of mobDrops) {
       if (Math.random() <= drop.chance) {
+        let itemId = drop.item;
+        if (this.onFire) {
+          if (itemId === -22) itemId = -23; // RAW_BEEF -> COOKED_BEEF
+          if (itemId === -24) itemId = -25; // RAW_PORK -> COOKED_PORK
+        }
         const count = drop.min + Math.floor(Math.random() * (drop.max - drop.min + 1));
         if (count > 0) {
-          drops.push({ id: drop.item, count });
+          drops.push({ id: itemId, isBlock: drop.isBlock, count });
         }
       }
     }
     return drops;
-  }
 
   update(dt, playerPos, isNight) {
     if (!this.alive) {
@@ -799,7 +810,9 @@ class Mob {
       this.velocity.x *= 0.3;
       this.velocity.z *= 0.3;
       // Signal arrow shot — handled by MobManager
-      this._pendingProjectile = { target: playerPos.clone(), damage: this.type.damage };
+      const targetPos = playerPos.clone();
+      targetPos.y += 1.5;
+      this._pendingProjectile = { target: targetPos, damage: this.type.damage };
       return;
     }
 
@@ -989,7 +1002,9 @@ export class MobManager {
     this.spawnTimer += dt;
     this.playerAttackCooldown = Math.max(0, this.playerAttackCooldown - dt);
     this.burnTimer += dt;
-    this.bossSpawnTimer += dt;
+    if (isNight) {
+      this.bossSpawnTimer += dt;
+    }
     const doBurn = this.burnTimer >= 0.5;
     if (doBurn) this.burnTimer = 0;
 
@@ -1019,8 +1034,17 @@ export class MobManager {
         continue;
       }
 
-      // Despawn day monsters (slowly remove them) — bosses are immune
+      // Check if burning (daylight or lava)
+      let burning = false;
+      const blockId = this.world.getBlock(Math.floor(mob.position.x), Math.floor(mob.position.y), Math.floor(mob.position.z));
+      if (blockId === BlockType.LAVA) burning = true;
       if (!isNight && mob.category === MOB_CATEGORY.MONSTER && mob.alive && !mob.isBoss) {
+        burning = true;
+      }
+      
+      mob.onFire = burning;
+
+      if (burning && mob.alive) {
         if (doBurn) {
           mob.takeDamage(1, null);
         }
@@ -1056,7 +1080,7 @@ export class MobManager {
       // Collect drops from dead mobs
       if (!mob.alive && mob._drops && mob._drops.length > 0) {
         for (const drop of mob._drops) {
-          this.pendingDrops.push(drop);
+          this.pendingDrops.push({ ...drop, position: mob.position.clone() });
         }
         mob._drops = null;
       }
@@ -1159,6 +1183,12 @@ export class MobManager {
   _findGround(wx, wz) {
     const ix = Math.floor(wx);
     const iz = Math.floor(wz);
+    
+    // Check if chunk is loaded first
+    const cx = Math.floor(ix / 16);
+    const cz = Math.floor(iz / 16);
+    if (!this.world.chunks.has(`${cx},${cz}`)) return -1;
+
     // Search from top down
     for (let y = 100; y > 0; y--) {
       if (this.world.isSolid(ix, y, iz) && !this.world.isSolid(ix, y + 1, iz) && !this.world.isSolid(ix, y + 2, iz)) {
@@ -1275,6 +1305,9 @@ export class MobManager {
           const block = this.world.getBlock(cx + dx, cy + dy, cz + dz);
           if (block !== BlockType.AIR && block !== BlockType.BEDROCK) {
             this.world.setBlock(cx + dx, cy + dy, cz + dz, BlockType.AIR);
+            if (this.world.saveModification) {
+              this.world.saveModification(cx + dx, cy + dy, cz + dz, BlockType.AIR);
+            }
           }
         }
       }

@@ -73,7 +73,7 @@ export class DayNightCycle {
       positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
     }
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.5, sizeAttenuation: false });
+    const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.5, sizeAttenuation: false, transparent: true });
     const stars = new THREE.Points(geo, mat);
     stars.visible = false;
     return stars;
@@ -147,14 +147,21 @@ export class DayNightCycle {
       this.scene.fog.color.copy(fogColor);
     }
 
+    let weatherMultAmbient = 1.0;
+    let weatherMultSun = 1.0;
+    if (this.weather === 'rain' || this.weather === 'thunder') {
+      weatherMultAmbient = 0.85;
+      weatherMultSun = 0.6;
+    }
+
     // Lighting
     if (this.ambientLight) {
-      this.ambientLight.intensity = 0.15 + intensity * 0.65;
+      this.ambientLight.intensity = (0.15 + intensity * 0.65) * weatherMultAmbient;
       this.ambientLight.color.setHex(this.isNight ? 0x304060 : 0x808090);
     }
 
     if (this.sunLight) {
-      this.sunLight.intensity = intensity * 1.0;
+      this.sunLight.intensity = intensity * 1.0 * weatherMultSun;
       // Move sun across the sky
       const sunAngle = (this.time - 0.25) * Math.PI * 2;
       this.sunLight.position.set(
@@ -172,7 +179,7 @@ export class DayNightCycle {
     }
 
     if (this.hemiLight) {
-      this.hemiLight.intensity = 0.1 + intensity * 0.3;
+      this.hemiLight.intensity = (0.1 + intensity * 0.3) * weatherMultAmbient;
     }
 
     // Stars
@@ -205,15 +212,6 @@ export class DayNightCycle {
       }
     }
 
-    // Darken scene during rain/thunder
-    if (this.weather === 'rain' || this.weather === 'thunder') {
-      if (this.ambientLight) {
-        this.ambientLight.intensity *= 0.85;
-      }
-      if (this.sunLight) {
-        this.sunLight.intensity *= 0.6;
-      }
-    }
   }
 
   _applyWeatherOverlay() {

@@ -150,7 +150,7 @@ export class Inventory {
   // Place item into crafting grid
   setCraftingSlot(index, slotData) {
     if (index < 0 || index >= 9) return;
-    this.craftingGrid[index] = slotData ? { id: slotData.id, isBlock: slotData.isBlock, count: 1 } : null;
+    this.craftingGrid[index] = slotData ? { id: slotData.id, isBlock: slotData.isBlock, count: slotData.count || 1 } : null;
     this._checkCrafting();
   }
 
@@ -305,8 +305,8 @@ export class Inventory {
         if (this.furnaceSmeltTime >= this.furnaceSmeltTotal) {
           this.furnaceSmeltTime = 0;
           // Produce output
-          const resultId = recipe.result;
-          const isBlock = recipe.resultIsBlock !== false;
+          const resultId = recipe.output;
+          const isBlock = recipe.outputIsBlock !== false;
           if (!this.furnaceOutput) {
             this.furnaceOutput = { id: resultId, isBlock, count: 1 };
           } else if (this.furnaceOutput.id === resultId && this.furnaceOutput.count < 64) {

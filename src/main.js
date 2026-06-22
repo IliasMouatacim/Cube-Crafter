@@ -138,6 +138,9 @@ class Game {
 
     // Cheat code input buffer
     this._cheatBuffer = '';
+
+    // Floating dropped items in the world
+    this.droppedItems = [];
     this._cheatTimer = 0;
     this._cheatCodes = {
       'day': () => { this.dayNight.time = 0.30; },
@@ -163,9 +166,6 @@ class Game {
     // Player arrows (bow projectiles)
     this.playerArrows = [];
 
-    // Persistent chest storage — key: "x,y,z" → Array<slot>
-    this.chestStorage = {};
-
     // NPC trading state
     this.tradeOpen = false;
     this._tradeScreen = document.getElementById('trade-screen');
@@ -183,6 +183,14 @@ class Game {
     document.getElementById('join-code').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') this._joinGame();
     });
+
+    // Auto-save
+    window.addEventListener('beforeunload', () => {
+      if (this.running) this.saveGame();
+    });
+    setInterval(() => {
+      if (this.running) this.saveGame();
+    }, 10000);
   }
 
   _initPlayer2() {
@@ -214,7 +222,7 @@ class Game {
 
     // Pointer lock (Keyboard player mouse)
     document.addEventListener('pointerlockchange', () => {
-      const p = (this.coopMode && this.player2) ? this.player2 : this.player;
+      const p = this.player;
       p.mouseLocked = !!document.pointerLockElement;
     });
 
@@ -225,9 +233,9 @@ class Game {
       // Close trade screen on click outside
       if (this.tradeOpen) return;
 
-      const p = (this.coopMode && this.player2) ? this.player2 : this.player;
-      const inv = (this.coopMode && this.inventory2) ? this.inventory2 : this.inventory;
-      const ui = (this.coopMode && this.ui2) ? this.ui2 : this.ui;
+      const p = this.player;
+      const inv = this.inventory;
+      const ui = this.ui;
 
       // Re-lock pointer if lost (e.g. tabbed out and came back)
       if (!p.mouseLocked && !ui.inventoryOpen) {
@@ -241,9 +249,8 @@ class Game {
         // Trigger punch animation
         p.characterModel.triggerPunch();
         SoundFX.hit();
-        // Use player position (not camera) for attack origin
-        const attackOrigin = p.position.clone();
-        attackOrigin.y += 1.5;
+        // Use camera position for attack origin
+        const attackOrigin = p.camera.position.clone();
         _tmpDir.set(0, 0, -1).applyQuaternion(p.camera.quaternion);
 
         // Check if holding bow — shoot arrow
@@ -289,9 +296,9 @@ class Game {
     document.addEventListener('keydown', (e) => {
       if (!this.running) return;
 
-      const p = (this.coopMode && this.player2) ? this.player2 : this.player;
-      const inv = (this.coopMode && this.inventory2) ? this.inventory2 : this.inventory;
-      const ui = (this.coopMode && this.ui2) ? this.ui2 : this.ui;
+      const p = this.player;
+      const inv = this.inventory;
+      const ui = this.ui;
 
       // Cheat code detection — typed letters while playing
       if (!ui.inventoryOpen && !this.tradeOpen && e.key.length === 1 && /^[a-z]$/i.test(e.key)) {
@@ -400,6 +407,7 @@ class Game {
 
     const dropType = bd.drops !== undefined ? bd.drops : blockType;
     this.world.setBlock(blockPos.x, blockPos.y, blockPos.z, BlockType.AIR);
+    this.world.saveModification(blockPos.x, blockPos.y, blockPos.z, BlockType.AIR);
 
     // Broadcast block break to network
     this.network.sendBlockChange(blockPos.x, blockPos.y, blockPos.z, BlockType.AIR);
@@ -408,7 +416,30 @@ class Game {
     SoundFX.blockBreak();
     this.particles.spawnBlockBreak(blockPos.x, blockPos.y, blockPos.z, bd.topColor || bd.color);
 
-    if (dropType !== BlockType.AIR) {
+    let canHarvest = true;
+    const bname = bd.name.toLowerCase();
+    if (bname.includes('ore') || bname.includes('stone') || bname.includes('cobble') || bname.includes('obsidian') || bname.includes('furnace')) {
+      canHarvest = false;
+      const held = inventory.getHeldSlot();
+      if (held && !held.isBlock) {
+        const idata = ItemData[held.id];
+        if (idata && idata.toolType === ToolType.PICKAXE) {
+          let tier = 0;
+          if (idata.name.includes('Diamond')) tier = 3;
+          else if (idata.name.includes('Iron')) tier = 2;
+          else if (idata.name.includes('Stone')) tier = 1;
+          
+          let reqTier = 0;
+          if (bname.includes('obsidian')) reqTier = 3;
+          else if (bname.includes('diamond') || bname.includes('gold') || bname.includes('emerald') || bname.includes('redstone')) reqTier = 2;
+          else if (bname.includes('iron') || bname.includes('lapis')) reqTier = 1;
+          
+          if (tier >= reqTier) canHarvest = true;
+        }
+      }
+    }
+
+    if (dropType !== BlockType.AIR && !player.creativeMode && canHarvest) {
       inventory.addBlock(dropType, 1);
       SoundFX.pickup();
     }
@@ -420,9 +451,9 @@ class Game {
 
   // Progressive mining: called every frame while LMB held
   _updateMining(dt) {
-    const p = (this.coopMode && this.player2) ? this.player2 : this.player;
-    const inv = (this.coopMode && this.inventory2) ? this.inventory2 : this.inventory;
-    const ui = (this.coopMode && this.ui2) ? this.ui2 : this.ui;
+    const p = this.player;
+    const inv = this.inventory;
+    const ui = this.ui;
 
     if (!this.breaking || ui.inventoryOpen || this.tradeOpen) {
       this.breakProgress = 0;
@@ -483,9 +514,9 @@ class Game {
   }
 
   _updatePlacing(dt) {
-    const p = (this.coopMode && this.player2) ? this.player2 : this.player;
-    const inv = (this.coopMode && this.inventory2) ? this.inventory2 : this.inventory;
-    const ui = (this.coopMode && this.ui2) ? this.ui2 : this.ui;
+    const p = this.player;
+    const inv = this.inventory;
+    const ui = this.ui;
     if (!this.placing || ui.inventoryOpen || this.tradeOpen) return;
     this._placeCooldown -= dt;
     if (this._placeCooldown > 0) return;
@@ -503,6 +534,68 @@ class Game {
         else this.renderer.domElement.requestPointerLock();
       }
       return;
+    }
+    // Check crafting table
+    if (player.targetBlock && player.targetBlock.blockType === BlockType.CRAFTING_TABLE) {
+      const isOpen = ui.toggleInventory(true);
+      if (player === this.player) {
+        if (isOpen) { document.exitPointerLock(); player.mouseLocked = false; }
+        else this.renderer.domElement.requestPointerLock();
+      }
+      return;
+    }
+    // Check TNT ignition
+    if (player.targetBlock && player.targetBlock.blockType === BlockType.TNT) {
+      const held = inventory.getHeldSlot();
+      if (held && !held.isBlock && held.id === ItemType.FLINT) {
+        const bp = player.targetBlock.blockPos;
+        this.world.setBlock(bp.x, bp.y, bp.z, BlockType.AIR);
+        this.world.saveModification(bp.x, bp.y, bp.z, BlockType.AIR);
+        
+        // Spawn a dummy TNT mob to handle explosion
+        const geo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+        const mat = new THREE.MeshLambertMaterial({ color: 0xff4444 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(bp.x + 0.5, bp.y + 0.5, bp.z + 0.5);
+        this.scene.add(mesh);
+        
+        const tntMob = {
+           isTNT: true,
+           alive: true,
+           position: mesh.position.clone(),
+           velocity: new THREE.Vector3(0, 5, 0),
+           fusing: true,
+           fuseTimer: 0,
+           type: { damage: 30 },
+           _pendingExplosion: null,
+           mesh: mesh,
+           category: 99,
+           update: function(dt) {
+             this.fuseTimer += dt;
+             this.velocity.y -= 24 * dt;
+             this.position.addScaledVector(this.velocity, dt);
+             if (this.position.y < bp.y + 0.5) { this.position.y = bp.y + 0.5; this.velocity.y = 0; }
+             this.mesh.position.copy(this.position);
+             
+             if (Math.floor(this.fuseTimer * 4) % 2 === 0) {
+                this.mesh.material.color.setHex(0xffffff);
+             } else {
+                this.mesh.material.color.setHex(0xff4444);
+             }
+
+             if (this.fuseTimer >= 2.0) {
+               this._pendingExplosion = { radius: 5, damage: this.type.damage };
+               this.alive = false;
+               return false;
+             }
+             return true;
+           },
+           dispose: function(scene) { scene.remove(this.mesh); }
+        };
+        this.mobs.mobs.push(tntMob);
+        SoundFX.blockBreak();
+        return;
+      }
     }
     // Check chest (persistent storage)
     if (player.targetBlock && player.targetBlock.blockType === BlockType.CHEST) {
@@ -529,6 +622,35 @@ class Game {
         inventory.useHeldItem();
         ui.updateHotbar();
       }
+      return;
+    }
+    // Try throw ender pearl
+    if (held && !held.isBlock && held.id === ItemType.ENDER_PEARL) {
+      if (!player.creativeMode) inventory.useHeldItem();
+      ui.updateHotbar();
+      SoundFX.bowShoot();
+
+      const origin = player.position.clone();
+      origin.y += 1.5;
+      _tmpDir.set(0, 0, -1).applyQuaternion(player.camera.quaternion);
+      const speed = 20;
+      
+      const geo = new THREE.SphereGeometry(0.1, 4, 4);
+      const mat = new THREE.MeshBasicMaterial({ color: 0x33b8a3 });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(origin);
+      this.scene.add(mesh);
+      
+      this.playerArrows.push({
+        position: origin.clone(),
+        velocity: _tmpDir.clone().multiplyScalar(speed).add(new THREE.Vector3(0, 3, 0)),
+        mesh,
+        damage: 0,
+        life: 10,
+        type: 'pearl',
+        player: player
+      });
+      return;
     } else {
       this._placeBlock(player, inventory, ui);
     }
@@ -570,6 +692,7 @@ class Game {
     if (this.world.getBlock(px, py, pz) !== BlockType.AIR) return;
 
     this.world.setBlock(px, py, pz, placeType);
+    this.world.saveModification(px, py, pz, placeType);
 
     // Broadcast block place to network
     this.network.sendBlockChange(px, py, pz, placeType);
@@ -649,6 +772,11 @@ class Game {
       const bz = Math.floor(a.position.z);
       const block = this.world.getBlock(bx, by, bz);
       if (block !== undefined && block !== BlockType.AIR && block !== BlockType.WATER) {
+        if (a.type === 'pearl') {
+          a.player.position.set(a.position.x, a.position.y + 1.5, a.position.z);
+          a.player.velocity.set(0, 0, 0);
+          SoundFX.pickup();
+        }
         this.scene.remove(a.mesh);
         this.playerArrows.splice(i, 1);
         continue;
@@ -663,8 +791,7 @@ class Game {
 
   // ── Persistent Chest Storage ─────────────────────────────
   _openChest(chestKey, inventory, ui) {
-    // Initialize chest if first open — give random loot
-    if (!this.chestStorage[chestKey]) {
+    if (!this.world.chests.has(chestKey)) {
       const lootTable = [
         { id: BlockType.IRON_ORE, isBlock: true, count: 1 + Math.floor(Math.random() * 4) },
         { id: BlockType.GOLD_ORE, isBlock: true, count: 1 + Math.floor(Math.random() * 3) },
@@ -675,19 +802,23 @@ class Game {
         { id: ItemType.IRON_INGOT, isBlock: false, count: Math.floor(Math.random() * 3) },
         { id: ItemType.ARROW, isBlock: false, count: Math.floor(Math.random() * 8) },
       ];
-      this.chestStorage[chestKey] = lootTable.filter(l => l.count > 0);
+      const items = new Array(27).fill(null);
+      // Place random loot in random slots
+      for (const loot of lootTable) {
+        if (loot.count <= 0) continue;
+        let slot = Math.floor(Math.random() * 27);
+        while (items[slot]) slot = (slot + 1) % 27;
+        items[slot] = loot;
+      }
+      this.world.chests.set(chestKey, items);
     }
 
-    // Transfer all items from chest to player
-    const items = this.chestStorage[chestKey];
-    for (const item of items) {
-      if (item.isBlock) inventory.addBlock(item.id, item.count);
-      else inventory.addItem(item.id, item.count);
+    const chestData = this.world.chests.get(chestKey);
+    const isOpen = ui.toggleChest(chestKey, chestData);
+    if (inventory === this.inventory) { // P1 only
+      if (isOpen) { document.exitPointerLock(); this.player.mouseLocked = false; }
+      else this.renderer.domElement.requestPointerLock();
     }
-    SoundFX.pickup();
-    // Clear chest
-    this.chestStorage[chestKey] = [];
-    ui.updateHotbar();
   }
 
   // ── NPC Trading ──────────────────────────────────────────
@@ -771,8 +902,6 @@ class Game {
         const cx = pcx + dx;
         const cz = pcz + dz;
         const key = `${cx},${cz}`;
-        if (this.mobs._npcSpawnedChunks.has(key)) continue;
-        this.mobs._npcSpawnedChunks.add(key);
         const wx = cx * CHUNK_SIZE + 8;
         const wz = cz * CHUNK_SIZE + 8;
         const biome = this.world.generator.getBiome(wx, wz);
@@ -1097,8 +1226,11 @@ class Game {
       BGM.play();
     });
 
-    const spawn = this.world.getSpawnPoint();
-    this.player.spawn(spawn);
+    const loaded = this.loadGame();
+    if (!loaded) {
+      const spawn = this.world.getSpawnPoint();
+      this.player.spawn(spawn);
+    }
 
     // Camera aspect for split-screen
     if (this.coopMode) {
@@ -1235,31 +1367,24 @@ class Game {
     if (explosionDmg > 0) SoundFX.explosion();
 
     // Arrow damage to P1
-    let arrowDmg = 0;
-    for (let i = this.mobs.projectiles.length - 1; i >= 0; i--) {
-      if (this.mobs.projectiles[i]._hitPlayer) {
-        arrowDmg += this.mobs.projectiles[i]._hitPlayer;
-        this.mobs.projectiles.splice(i, 1);
-      }
-    }
+    const arrowDmg = this.mobs.getArrowDamage();
     if (arrowDmg > 0 && !this.player.creativeMode) {
       this.player.takeDamage(arrowDmg);
       SoundFX.playerHurt();
     }
 
-    // Collect mob drops — give to whichever player is active (P1 in solo, P1+P2 in coop)
+    // Process new drops from mobs
     const drops = this.mobs.collectDrops();
     for (const drop of drops) {
-      if (drop.isBlock) {
-        this.inventory.addBlock(drop.id, drop.count);
-      } else {
-        this.inventory.addItem(drop.id, drop.count);
-      }
+      // Spawn slightly above mob center, give slight random velocity
+      const pos = drop.position.clone();
+      pos.y += 0.5;
+      const vel = new THREE.Vector3((Math.random() - 0.5) * 4, 3, (Math.random() - 0.5) * 4);
+      this._spawnDroppedItem(drop, pos, vel);
     }
-    if (drops.length > 0) {
-      SoundFX.pickup();
-      this.ui.updateHotbar();
-    }
+
+    // Update floating dropped items
+    this._updateDroppedItems(dt);
 
     // Update particles
     this.particles.update(dt);
@@ -1375,8 +1500,7 @@ class Game {
     if (player.gpPressed('_gp_attack')) {
       player.characterModel.triggerPunch();
       SoundFX.hit();
-      const attackOrigin = player.position.clone();
-      attackOrigin.y += 1.5;
+      const attackOrigin = player.camera.position.clone();
       _tmpDir.set(0, 0, -1).applyQuaternion(player.camera.quaternion);
 
       // Bow check
@@ -1459,6 +1583,84 @@ class Game {
     }
   }
 
+  _spawnDroppedItem(drop, position, velocity) {
+    let color = 0xffffff;
+    if (drop.isBlock && BlockData[drop.id]) {
+      color = BlockData[drop.id].color || 0xffffff;
+    } else if (!drop.isBlock && ItemData[drop.id]) {
+      color = ItemData[drop.id].color || 0xffffff;
+    }
+    
+    const geo = new THREE.BoxGeometry(0.25, 0.25, 0.25);
+    const mat = new THREE.MeshLambertMaterial({ color });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.copy(position);
+    this.scene.add(mesh);
+    
+    this.droppedItems.push({
+      drop, // { id, isBlock, count }
+      position: position.clone(),
+      velocity: velocity ? velocity.clone() : new THREE.Vector3(),
+      mesh,
+      life: 300 // 5 minutes
+    });
+  }
+
+  _updateDroppedItems(dt) {
+    for (let i = this.droppedItems.length - 1; i >= 0; i--) {
+      const item = this.droppedItems[i];
+      item.life -= dt;
+      if (item.life <= 0) {
+        this.scene.remove(item.mesh);
+        this.droppedItems.splice(i, 1);
+        continue;
+      }
+      
+      // Physics
+      item.velocity.y -= 15 * dt;
+      item.position.x += item.velocity.x * dt;
+      item.position.y += item.velocity.y * dt;
+      item.position.z += item.velocity.z * dt;
+      
+      // Ground collision
+      const checkX = Math.floor(item.position.x);
+      const checkY = Math.floor(item.position.y - 0.125);
+      const checkZ = Math.floor(item.position.z);
+      if (this.world.isSolid(checkX, checkY, checkZ)) {
+        item.position.y = checkY + 1.125;
+        item.velocity.set(0, 0, 0);
+      }
+      
+      item.mesh.position.copy(item.position);
+      item.mesh.rotation.y += dt; // Spin
+      
+      // Check pickup
+      let pickedUpBy = null;
+      if (this.player.position.distanceTo(item.position) < 1.5) {
+        pickedUpBy = 1;
+      } else if (this.coopMode && this.player2 && this.player2.position.distanceTo(item.position) < 1.5) {
+        pickedUpBy = 2;
+      }
+      
+      if (pickedUpBy) {
+        const inventory = pickedUpBy === 1 ? this.inventory : this.inventory2;
+        const ui = pickedUpBy === 1 ? this.ui : this.ui2;
+        
+        if (item.drop.isBlock) {
+          inventory.addBlock(item.drop.id, item.drop.count);
+        } else {
+          inventory.addItem(item.drop.id, item.drop.count);
+        }
+        
+        SoundFX.pickup();
+        ui.updateHotbar();
+        
+        this.scene.remove(item.mesh);
+        this.droppedItems.splice(i, 1);
+      }
+    }
+  }
+
   _handleTouchActions(dt) {
     const touch = this.touch;
 
@@ -1466,8 +1668,7 @@ class Game {
     if (touch.consumeAttack()) {
       this.player.characterModel.triggerPunch();
       SoundFX.hit();
-      const attackOrigin = this.player.position.clone();
-      attackOrigin.y += 1.5;
+      const attackOrigin = this.player.camera.position.clone();
       _tmpDir.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
 
       const heldSlot = this.inventory.getHeldSlot();
@@ -1513,7 +1714,57 @@ class Game {
       this.ui.updateHotbar();
     }
   }
+  saveGame() {
+    if (this.coopMode || this.multiplayerMode) return;
+    const data = {
+      seed: this.world.seed,
+      player: {
+        x: this.player.position.x,
+        y: this.player.position.y,
+        z: this.player.position.z,
+        yaw: this.player.yaw,
+        pitch: this.player.pitch,
+        health: this.player.health,
+        hunger: this.player.hunger,
+      },
+      inventory: this.inventory.slots,
+      hotbar: this.inventory.hotbarSize,
+      armor: this.player.armorSlots,
+      modifications: Array.from(this.world.modifications.entries()),
+      doorStates: Array.from(this.world.doorStates.entries()),
+      chests: Array.from(this.world.chests.entries())
+    };
+    localStorage.setItem('cubecrafter_save', JSON.stringify(data));
+  }
+
+  loadGame() {
+    if (this.coopMode || this.multiplayerMode) return false;
+    const dataStr = localStorage.getItem('cubecrafter_save');
+    if (!dataStr) return false;
+    try {
+      const data = JSON.parse(dataStr);
+      this.world.seed = data.seed;
+      this.world.generator = new WorldGenerator(data.seed);
+      this.player.position.set(data.player.x, data.player.y, data.player.z);
+      this.player.yaw = data.player.yaw;
+      this.player.pitch = data.player.pitch;
+      this.player.health = data.player.health;
+      this.player.hunger = data.player.hunger;
+      this.inventory.slots = data.inventory || new Array(36).fill(null);
+      this.inventory.hotbarSize = data.hotbar || 9;
+      this.player.armorSlots = data.armor || [null, null, null, null];
+      this.world.modifications = new Map(data.modifications || []);
+      this.world.doorStates = new Map(data.doorStates || []);
+      this.world.chests = new Map(data.chests || []);
+      
+      this.ui.updateAll();
+      return true;
+    } catch (e) {
+      console.error('Failed to load save', e);
+      return false;
+    }
+  }
 }
 
-// Boot the game
-const game = new Game();
+// Start game instance
+window.game = new Game();
