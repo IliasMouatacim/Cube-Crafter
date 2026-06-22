@@ -262,7 +262,7 @@ class Game {
 
         // Use weapon damage from held item
         const damage = getAttackDamage(heldSlot);
-        const hitMob = this.mobs.playerAttack(attackOrigin, _tmpDir, damage);
+        const hitMob = this.mobs.playerAttack(p.position, attackOrigin, _tmpDir, damage);
         if (hitMob) {
           // Damage weapon on hit
           inv.damageHeldTool();
@@ -1513,7 +1513,7 @@ class Game {
         this._shootBow(player, inventory, ui);
       } else {
         const damage = getAttackDamage(held);
-        const hitMob = this.mobs.playerAttack(attackOrigin, _tmpDir, damage);
+        const hitMob = this.mobs.playerAttack(player.position, attackOrigin, _tmpDir, damage);
         if (hitMob) {
           inventory.damageHeldTool();
         } else {
@@ -1680,7 +1680,7 @@ class Game {
         this._shootBow(this.player, this.inventory, this.ui);
       } else {
         const damage = getAttackDamage(heldSlot);
-        const hitMob = this.mobs.playerAttack(attackOrigin, _tmpDir, damage);
+        const hitMob = this.mobs.playerAttack(this.player.position, attackOrigin, _tmpDir, damage);
         if (hitMob) {
           this.inventory.damageHeldTool();
         } else {

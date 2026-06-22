@@ -1122,7 +1122,7 @@ export class MobManager {
   }
 
   // Player attacks (called from main on left click)
-  playerAttack(cameraPos, cameraDir, damage = PLAYER_ATTACK_DAMAGE) {
+  playerAttack(playerPos, cameraPos, cameraDir, damage = PLAYER_ATTACK_DAMAGE) {
     if (this.playerAttackCooldown > 0) return false;
     this.playerAttackCooldown = PLAYER_ATTACK_COOLDOWN;
 
@@ -1133,18 +1133,20 @@ export class MobManager {
     for (const mob of this.mobs) {
       if (!mob.alive) continue;
 
+      // Distance from player to mob for reach limit
+      const distFromPlayer = mob.position.distanceTo(playerPos);
+      if (distFromPlayer > PLAYER_ATTACK_RANGE) continue;
+
       _tmpVec.subVectors(mob.position, cameraPos);
       // Add mob center offset
       _tmpVec.y += mob.type.h * 0.5;
-      const dist = _tmpVec.length();
-      if (dist > PLAYER_ATTACK_RANGE) continue;
 
       // Check angle - must be roughly in front (~75 degree cone, forgiving for 3rd person)
       const dot = _tmpVec.normalize().dot(cameraDir);
       if (dot < 0.25) continue;
 
-      if (dist < closestDist) {
-        closestDist = dist;
+      if (distFromPlayer < closestDist) {
+        closestDist = distFromPlayer;
         closestMob = mob;
       }
     }
