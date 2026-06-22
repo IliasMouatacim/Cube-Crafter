@@ -1241,8 +1241,12 @@ class Game {
       this.renderer.setScissorTest(true);
 
       this._initPlayer2();
-      // Spawn P2 slightly offset
-      this.player2.spawn({ x: spawn.x + 2, y: spawn.y, z: spawn.z + 2 });
+      // Spawn P2 slightly offset from P1
+      this.player2.spawn({ 
+        x: this.player.position.x + 2, 
+        y: this.player.position.y, 
+        z: this.player.position.z + 2 
+      });
 
       // Show split-screen divider and P2 UI
       document.getElementById('split-divider').style.display = 'block';
