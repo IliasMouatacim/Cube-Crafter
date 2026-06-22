@@ -737,6 +737,7 @@ class Mob {
       }
     }
     return drops;
+  }
 
   update(dt, playerPos, isNight) {
     if (!this.alive) {
