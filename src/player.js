@@ -445,21 +445,25 @@ export class Player {
     const gamepads = navigator.getGamepads ? navigator.getGamepads() : [];
     let gp = null;
 
-    // Always prefer the gamepad that matches our player index
-    if (gamepads[this.playerIndex]) {
-      gp = gamepads[this.playerIndex];
-      this.gamepadIndex = this.playerIndex;
-    } else if (this.gamepadIndex !== null && gamepads[this.gamepadIndex]) {
-      // Keep previously bound gamepad only in solo mode
-      if (!this.coopMode) {
-        gp = gamepads[this.gamepadIndex];
-      } else {
-        this.gamepadIndex = null;
+    if (this.coopMode) {
+      const validGamepads = [];
+      for (let i = 0; i < gamepads.length; i++) {
+        if (gamepads[i]) validGamepads.push(gamepads[i]);
+      }
+      
+      if (validGamepads.length === 1) {
+        // Only 1 gamepad connected: give it to Player 2
+        if (this.playerIndex === 1) gp = validGamepads[0];
+      } else if (validGamepads.length >= 2) {
+        // 2 or more gamepads: P1 gets first, P2 gets second
+        if (this.playerIndex === 0) gp = validGamepads[0];
+        if (this.playerIndex === 1) gp = validGamepads[1];
       }
     } else {
-      this.gamepadIndex = null;
-      // Solo fallback: Player 0 can use any available gamepad
-      if (!this.coopMode && this.playerIndex === 0) {
+      // Solo mode: use any available gamepad
+      if (this.gamepadIndex !== null && gamepads[this.gamepadIndex]) {
+        gp = gamepads[this.gamepadIndex];
+      } else {
         for (let i = 0; i < gamepads.length; i++) {
           if (gamepads[i]) { gp = gamepads[i]; this.gamepadIndex = i; break; }
         }
