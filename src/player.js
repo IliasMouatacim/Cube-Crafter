@@ -37,10 +37,10 @@ export const P1_KEYS = {
   right: 'KeyD',
   jump: 'Space',
   sprint: 'ShiftLeft',
-  lookUp: null,    // uses mouse
-  lookDown: null,
-  lookLeft: null,
-  lookRight: null,
+  lookUp: 'ArrowUp',
+  lookDown: 'ArrowDown',
+  lookLeft: 'ArrowLeft',
+  lookRight: 'ArrowRight',
   useMouse: true,
 };
 
@@ -118,6 +118,7 @@ export class Player {
     // Input state
     this.keys = {};
     this.mouseLocked = false;
+    this.lookSensitivity = 1;
 
     // Block highlight
     this.highlightMesh = this._createHighlight();
@@ -146,10 +147,12 @@ export class Player {
 
   _setupInput() {
     document.addEventListener('keydown', (e) => {
+      if (e.target.closest('dialog, input, button, textarea, select')) return;
+      if (this.keyBindings.useMouse && document.body.classList.contains('playing') && e.code.startsWith('Arrow')) e.preventDefault();
       this.keys[e.code] = true;
 
       // V = toggle 1st/3rd person (only for mouse players)
-      if (e.code === 'KeyV' && this.keyBindings.useMouse) {
+      if (e.code === 'KeyV' && !e.repeat && this.keyBindings.useMouse) {
         this.thirdPerson = !this.thirdPerson;
       }
     });
@@ -159,7 +162,7 @@ export class Player {
     if (this.keyBindings.useMouse) {
       document.addEventListener('mousemove', (e) => {
         if (!this.mouseLocked) return;
-        const sensitivity = 0.002;
+        const sensitivity = 0.002 * this.lookSensitivity;
         this.yaw -= e.movementX * sensitivity;
         this.pitch -= e.movementY * sensitivity;
         this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
@@ -179,9 +182,9 @@ export class Player {
 
     const kb = this.keyBindings;
 
-    // Keyboard-based look (for P2 or non-mouse players)
-    if (!kb.useMouse) {
-      const lookSpeed = 2.5; // radians/sec
+    // Keyboard look can be used independently of pointer lock.
+    if (kb.lookLeft) {
+      const lookSpeed = 2.5 * this.lookSensitivity; // radians/sec
       if (kb.lookLeft && this.keys[kb.lookLeft]) this.yaw += lookSpeed * dt;
       if (kb.lookRight && this.keys[kb.lookRight]) this.yaw -= lookSpeed * dt;
       if (kb.lookUp && this.keys[kb.lookUp]) {
@@ -201,7 +204,9 @@ export class Player {
     _forward.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     _right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
 
-    this.sprinting = (!!this.keys[kb.sprint] || !!this.keys['_gp_sprint']) && this.hunger >= 6;
+    const sprintPressed = this.keys[kb.sprint] || this.keys._gp_sprint || this.keys._touch_sprint;
+    const forwardPressed = this.keys[kb.forward] || this.keys._touch_forward;
+    this.sprinting = Boolean(sprintPressed) && this.hunger >= 6;
     const speed = PLAYER_SPEED * (this.sprinting ? SPRINT_MULTIPLIER : 1.0);
 
     // Hunger system
@@ -231,10 +236,10 @@ export class Player {
     }
     _moveDir.set(0, 0, 0);
 
-    if (this.keys[kb.forward] || this.keys['_gp_forward']) _moveDir.add(_forward);
-    if (this.keys[kb.back] || this.keys['_gp_back']) _moveDir.sub(_forward);
-    if (this.keys[kb.left] || this.keys['_gp_left']) _moveDir.sub(_right);
-    if (this.keys[kb.right] || this.keys['_gp_right']) _moveDir.add(_right);
+    if (forwardPressed || this.keys._gp_forward) _moveDir.add(_forward);
+    if (this.keys[kb.back] || this.keys._gp_back || this.keys._touch_back) _moveDir.sub(_forward);
+    if (this.keys[kb.left] || this.keys._gp_left || this.keys._touch_left) _moveDir.sub(_right);
+    if (this.keys[kb.right] || this.keys._gp_right || this.keys._touch_right) _moveDir.add(_right);
 
     // Update character facing direction toward movement direction (third-person freelook)
     if (_moveDir.lengthSq() > 0.01 && this.thirdPerson) {
@@ -273,7 +278,7 @@ export class Player {
     }
 
     // Creative double-tap jump to toggle fly
-    const jumpPressed = !!(this.keys[kb.jump] || this.keys['_gp_jump']);
+    const jumpPressed = this.keys[kb.jump] || this.keys._gp_jump || this.keys._touch_jump;
     if (this.creativeMode && jumpPressed && this._jumpReleased) {
       const now = performance.now();
       if (now - this._lastJumpTime < 300) {
@@ -295,7 +300,7 @@ export class Player {
       this.velocity.y = 0;
       const flySpeed = 10;
       if (jumpPressed) this.velocity.y = flySpeed;
-      if (this.keys[kb.sprint] || this.keys['_gp_sprint']) this.velocity.y = -flySpeed;
+      if (sprintPressed) this.velocity.y = -flySpeed;
       this.wasFalling = false;
       this.onGround = false;
     } else if (this.inWater) {
@@ -308,16 +313,16 @@ export class Player {
       this.velocity.y += GRAVITY * 0.15 * dt; // gentle sink
 
       // Space = swim up
-      if (this.keys[kb.jump] || this.keys['_gp_jump']) {
+      if (jumpPressed) {
         this.velocity.y = 3.5;
       }
       // Shift = dive down
-      if (this.keys[kb.sprint]) {
+      if (this.keys[kb.sprint] || this.keys._touch_sprint) {
         this.velocity.y = -3.5;
       }
 
       // If moving forward and looking up/down, swim in look direction
-      if (this.keys[kb.forward] && Math.abs(this.pitch) > 0.3) {
+      if (forwardPressed && Math.abs(this.pitch) > 0.3) {
         this.velocity.y += -Math.sin(this.pitch) * speed * swimFactor * 0.5;
         this.velocity.y = Math.max(-5, Math.min(5, this.velocity.y));
       }
@@ -330,7 +335,7 @@ export class Player {
       this.velocity.z = _moveDir.z;
 
       this.velocity.y += GRAVITY * dt;
-      if ((this.keys[kb.jump] || this.keys['_gp_jump']) && this.onGround) {
+      if (jumpPressed && this.onGround) {
         this.velocity.y = JUMP_FORCE;
         this.onGround = false;
       }
@@ -501,9 +506,9 @@ export class Player {
     // Right stick: look (axes 2, 3)
     const rx = Math.abs(gp.axes[2]) > dz ? gp.axes[2] : 0;
     const ry = Math.abs(gp.axes[3]) > dz ? gp.axes[3] : 0;
-    if (rx !== 0) this.yaw -= rx * this.gamepadLookSpeed * dt;
+    if (rx !== 0) this.yaw -= rx * this.gamepadLookSpeed * this.lookSensitivity * dt;
     if (ry !== 0) {
-      this.pitch -= ry * this.gamepadLookSpeed * dt;
+      this.pitch -= ry * this.gamepadLookSpeed * this.lookSensitivity * dt;
       this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch));
     }
 

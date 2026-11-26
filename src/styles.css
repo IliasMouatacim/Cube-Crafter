@@ -963,6 +963,7 @@ canvas {
 }
 
 #touch-joystick-zone {
+  touch-action: none;
   position: absolute;
   left: 0;
   bottom: 0;
@@ -998,6 +999,7 @@ canvas {
 }
 
 #touch-look-zone {
+  touch-action: none;
   position: absolute;
   right: 0;
   top: 0;
@@ -1220,5 +1222,148 @@ canvas {
   .break-progress {
     bottom: 90px;
     width: 90px;
+  }
+}
+#start-screen {
+  height: 100dvh;
+  overflow-y: auto;
+  justify-content: safe center;
+  padding: 1.25rem 1rem;
+}
+
+button:focus-visible, input:focus-visible {
+  outline: 3px solid #ffe08b;
+  outline-offset: 4px;
+}
+
+[data-open-settings] {
+  color: #f5f8f2;
+  background: #172b24;
+  border: 1px solid #b4d8bf;
+  border-radius: 5px;
+  padding: 0.55rem 0.8rem;
+  font: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+#in-game-settings {
+  position: fixed;
+  right: calc(6rem + env(safe-area-inset-right));
+  top: max(0.5rem, env(safe-area-inset-top));
+  z-index: 510;
+}
+
+#play-settings {
+  margin: auto;
+  width: min(32rem, calc(100% - 1.75rem));
+  max-height: calc(100dvh - 1.75rem);
+  padding: clamp(1rem, 4vw, 1.75rem);
+  border: 1px solid #91aa9c;
+  border-radius: 12px;
+  background: #13241f;
+  color: #f4f8f4;
+  font-family: system-ui, sans-serif;
+  user-select: text;
+  overflow: auto;
+}
+
+#play-settings::backdrop {
+  background: rgb(5 12 17 / 78%);
+}
+
+#play-settings form {
+  display: grid;
+  gap: 0.65rem;
+}
+
+#play-settings label {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 2.5rem;
+  cursor: pointer;
+}
+
+#play-settings input {
+  accent-color: #a7e6a8;
+}
+
+#play-settings input[type=checkbox] {
+  width: 1.2rem;
+  height: 1.2rem;
+  flex: 0 0 auto;
+}
+
+#play-settings .settings-slider {
+  align-items: stretch;
+  flex-direction: column;
+  margin-block: 0.35rem;
+}
+
+#play-settings button {
+  justify-self: start;
+  min-height: 2.75rem;
+  padding: 0.4rem 1.5rem;
+  background: #d6eccd;
+  color: #102218;
+  border: 0;
+  border-radius: 5px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.creature-cue {
+  position: fixed;
+  z-index: 155;
+  top: 58%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.45rem 0.7rem;
+  max-width: 85vw;
+  border: 1px solid #a5b7ae;
+  border-radius: 5px;
+  background: #121d20;
+  color: #fff;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+.coop-mode .creature-cue {
+  max-width: 44vw;
+}
+
+.coop-mode #creature-cue {
+  left: 25%;
+}
+
+#p2-creature-cue {
+  left: 75%;
+}
+
+.high-contrast #crosshair, .high-contrast #p2-crosshair {
+  color: #fff;
+  font-size: 32px;
+  font-weight: 700;
+  text-shadow: -2px 0 #000, 2px 0 #000, 0 -2px #000, 0 2px #000;
+}
+
+.reduced-motion .weather-overlay {
+  animation: none;
+  opacity: 0.2;
+}
+
+@media (max-height: 520px) {
+  #play-settings {
+    padding: 1rem;
+  }
+
+  #play-settings form {
+    gap: 0.35rem;
+  }
+
+  #play-settings label {
+    min-height: 2.2rem;
   }
 }

@@ -203,7 +203,18 @@ export class CharacterModel {
     // Head pitches up/down (sign flipped to match the PI body rotation)
     this.headGroup.rotation.x = pitch * 0.8;
 
-    // Animate
+    if (this.reducedMotion) {
+      this.punchTimer = 0;
+      this.torso.position.y = 0.95;
+      this.bodyContainer.position.y = isSwimming ? 0.6 : 0;
+      this.bodyContainer.rotation.x = isSwimming ? Math.PI * 0.425 : 0;
+      this.torso.rotation.x = 0;
+      this.leftArmPivot.rotation.set(0, 0, 0);
+      this.rightArmPivot.rotation.set(0, 0, 0);
+      this.leftLegPivot.rotation.x = this.rightLegPivot.rotation.x = 0;
+      return;
+    }
+
     if (isSwimming) {
       this._animateSwim(dt);
     } else if (isMoving) {

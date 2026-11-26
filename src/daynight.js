@@ -16,6 +16,7 @@ export class DayNightCycle {
     this.scene = scene;
     this.time = 0.25; // Start at morning (0=midnight, 0.5=noon, 1.0=next midnight)
     this.dayCount = 1;
+    this.highContrast = false;
 
     // Weather system
     this.weather = 'clear'; // 'clear', 'rain', 'snow', 'thunder'
@@ -38,14 +39,14 @@ export class DayNightCycle {
 
     // Color targets
     this.skyColors = {
-      night:   new THREE.Color(0x0a0a1a),
+      night:   new THREE.Color(0x101b36),
       dawn:    new THREE.Color(0xFF7744),
       day:     new THREE.Color(0x87CEEB),
       dusk:    new THREE.Color(0xFF5533),
     };
 
     this.fogColors = {
-      night:   new THREE.Color(0x080818),
+      night:   new THREE.Color(0x101a31),
       dawn:    new THREE.Color(0xCC6644),
       day:     new THREE.Color(0x87CEEB),
       dusk:    new THREE.Color(0xCC4433),
@@ -156,17 +157,17 @@ export class DayNightCycle {
 
     // Lighting
     if (this.ambientLight) {
-      this.ambientLight.intensity = (0.15 + intensity * 0.65) * weatherMultAmbient;
-      this.ambientLight.color.setHex(this.isNight ? 0x304060 : 0x808090);
+      this.ambientLight.intensity = (0.23 + intensity * 0.41 + (this.highContrast ? (1 - intensity) * 0.55 : 0)) * weatherMultAmbient;
+      this.ambientLight.color.setHex(this.isNight ? (this.highContrast ? 0xb4d0ed : 0x8aa2cc) : 0xb7c5d5);
     }
 
     if (this.sunLight) {
-      this.sunLight.intensity = intensity * 1.0 * weatherMultSun;
+      this.sunLight.intensity = intensity * 1.28 * weatherMultSun;
       // Move sun across the sky
-      const sunAngle = (this.time - 0.25) * Math.PI * 2;
+      const sunAngle = (this.time - SUNRISE_START) / (SUNSET_END - SUNRISE_START) * Math.PI;
       this.sunLight.position.set(
         Math.cos(sunAngle) * 100,
-        Math.sin(sunAngle) * 200,
+        Math.sin(sunAngle) * 105,
         50
       );
 
@@ -179,7 +180,7 @@ export class DayNightCycle {
     }
 
     if (this.hemiLight) {
-      this.hemiLight.intensity = (0.1 + intensity * 0.3) * weatherMultAmbient;
+      this.hemiLight.intensity = (0.22 + intensity * 0.36 + (this.highContrast ? (1 - intensity) * 0.27 : 0)) * weatherMultAmbient;
     }
 
     // Stars

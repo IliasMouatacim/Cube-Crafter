@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -25,7 +25,9 @@
     <div id="split-divider"></div>
 
     <!-- P1 HUD (left side in co-op) -->
-    <div id="crosshair">+</div>
+    <div id="crosshair" aria-hidden="true">+</div>
+    <div id="creature-cue" class="creature-cue" role="status" aria-live="polite" hidden></div>
+    <button id="in-game-settings" type="button" data-open-settings hidden aria-label="Graphics and accessibility settings">Settings</button>
     <div id="hotbar"></div>
     <div id="health-bar"></div>
     <div id="hunger-bar"></div>
@@ -84,7 +86,8 @@
 
     <!-- P2 HUD (right side, hidden until co-op) -->
     <div id="p2-hud" style="display:none;">
-      <div id="p2-crosshair" class="p2-crosshair">+</div>
+      <div id="p2-crosshair" class="p2-crosshair" aria-hidden="true">+</div>
+      <div id="p2-creature-cue" class="creature-cue" role="status" aria-live="polite" hidden></div>
       <div id="p2-hotbar" class="p2-hotbar"></div>
       <div id="p2-health-bar" class="p2-health-bar"></div>
       <div id="p2-hunger-bar" class="p2-hunger-bar"></div>
@@ -105,30 +108,29 @@
     <!-- Start screen -->
     <div id="start-screen">
       <h1>VoxelCraft</h1>
-      <p>A Minecraft-like Voxel Sandbox</p>
+      <p>Explore, build, and survive in a voxel world.</p>
       <div class="start-buttons">
         <button id="play-btn">Solo Play</button>
         <button id="coop-btn">Split-Screen Co-op</button>
+        <button type="button" data-open-settings>Settings</button>
       </div>
       <div class="mp-section">
         <div class="mp-row">
           <button id="host-btn">Host Online Game</button>
         </div>
         <div class="mp-row">
-          <input id="join-code" type="text" placeholder="Room code" maxlength="5" autocomplete="off" spellcheck="false" />
+          <input id="join-code" type="text" placeholder="Room code" aria-label="Room code" maxlength="5" autocomplete="off" spellcheck="false" />
           <button id="join-btn">Join</button>
         </div>
         <div id="mp-status" class="mp-status"></div>
       </div>
       <div class="controls-help desktop-only">
         <p><strong>Player 1:</strong> WASD - Move | Space - Jump | Shift - Sprint</p>
-        <p>Mouse Look | Left Click - Break/Attack | Right Click - Place/Interact</p>
+        <p>Mouse or arrow keys - Look | Left Click or Z - Mine/Attack | Right Click or X - Place/Interact</p>
         <p>E - Inventory | 1-9 - Hotbar | Q - Drop | V - Toggle Camera</p>
-        <p>R - Equip Armor | G - Creative Mode | F - Close Furnace</p>
+        <p>R - Equip Armor | G - Creative Mode | M - Settings</p>
         <hr style="border-color:#444; margin:8px 0;">
-        <p><strong>Player 2:</strong> Arrow Keys - Move | Numpad 0 - Jump | R-Shift - Sprint</p>
-        <p>IJKL - Look | U - Break/Attack | O - Place</p>
-        <p>P - Inventory | Numpad 1-9 - Hotbar</p>
+        <p><strong>Player 2:</strong> Connect a gamepad for split-screen co-op.</p>
       </div>
       <div class="controls-help mobile-only">
         <p>Left side: Move joystick</p>
@@ -137,6 +139,21 @@
       </div>
     </div>
   </div>
+  <dialog id="play-settings" aria-labelledby="settings-title">
+    <form method="dialog">
+      <h2 id="settings-title">Graphics and accessibility</h2>
+      <label><input name="reflections" type="checkbox"> Water reflections</label>
+      <label><input name="shadows" type="checkbox"> Dynamic shadows</label>
+      <label><input name="reducedMotion" type="checkbox"> Reduce motion and flashing</label>
+      <label><input name="highContrast" type="checkbox"> Brighter nights and stronger crosshair contrast</label>
+      <label><input name="creatureCues" type="checkbox"> Creature names and danger cues</label>
+      <label><input name="peaceful" type="checkbox"> Peaceful wildlife mode</label>
+      <label class="settings-slider">Look sensitivity
+        <input name="sensitivity" type="range" min="0.5" max="2" step="0.1">
+      </label>
+      <button type="submit">Done</button>
+    </form>
+  </dialog>
   <script type="module" src="/src/main.js"></script>
 </body>
 

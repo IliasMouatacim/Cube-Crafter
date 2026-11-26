@@ -3,7 +3,7 @@
 // ============================================================
 
 import * as THREE from 'three';
-import { PLAYER_HEIGHT, PLAYER_WIDTH, BlockType } from './blocks.js';
+import { BlockType, Biome, CHUNK_SIZE, CHUNK_HEIGHT } from './blocks.js';
 import { MobDrops } from './items.js';
 
 // ── Mob type definitions ──────────────────────────────────
@@ -59,20 +59,70 @@ const NPC_TYPE = { name: 'Villager', color: 0x8a6a4a, hp: 20, speed: 1.0, w: 0.6
 // ── Spawn config ──────────────────────────────────────────
 
 const MAX_MOBS = 40;
-const SPAWN_RADIUS_MIN = 20;
-const SPAWN_RADIUS_MAX = 50;
+const SPAWN_RADIUS_MIN = 15;
+const SPAWN_RADIUS_MAX = 38;
 const DESPAWN_RADIUS = 70;
 const SPAWN_INTERVAL = 2.0; // seconds between spawn attempts
 const ATTACK_COOLDOWN = 1.0; // seconds between mob attacks
 const PLAYER_ATTACK_COOLDOWN = 0.4;
 const PLAYER_ATTACK_DAMAGE = 4;
 const PLAYER_ATTACK_RANGE = 4.0;
+const HABITAT = {
+  [Biome.PLAINS]: ['Cow', 'Pig', 'Sheep', 'Chicken', 'Horse', 'Rabbit'],
+  [Biome.FOREST]: ['Deer', 'Fox', 'Pig', 'Chicken'],
+  [Biome.BIRCH_FOREST]: ['Deer', 'Fox', 'Sheep', 'Chicken'],
+  [Biome.TAIGA]: ['Deer', 'Fox', 'Rabbit'],
+  [Biome.TUNDRA]: ['Fox', 'Rabbit', 'Sheep'],
+  [Biome.JUNGLE]: ['Pig', 'Chicken'],
+  [Biome.SAVANNA]: ['Horse', 'Cow', 'Chicken'],
+  [Biome.SWAMP]: ['Pig', 'Chicken', 'Rabbit'],
+  [Biome.MOUNTAINS]: ['Sheep', 'Deer', 'Rabbit'],
+  [Biome.DESERT]: ['Rabbit'],
+  [Biome.MESA]: ['Rabbit', 'Horse'],
+  [Biome.MUSHROOM_ISLAND]: ['Cow', 'Pig'],
+};
+
+const NIGHT_HABITAT = {
+  [Biome.DESERT]: ['Skeleton', 'Spider', 'Blaze', 'Wither Skeleton'],
+  [Biome.MOUNTAINS]: ['Ogre', 'Troll', 'Phantom', 'Dark Knight'],
+  [Biome.SWAMP]: ['Slime', 'Witch', 'Wraith', 'Banshee'],
+  [Biome.FOREST]: ['Werewolf', 'Spider', 'Goblin', 'Vampire'],
+  [Biome.TUNDRA]: ['Shadow', 'Wraith', 'Dark Knight', 'Skeleton'],
+};
+const COMMON_MONSTERS = ['Zombie', 'Skeleton', 'Spider', 'Creeper', 'Goblin'];
+const NATURAL_GROUND = new Set([
+  BlockType.GRASS, BlockType.DIRT, BlockType.STONE, BlockType.SAND, BlockType.SNOW,
+  BlockType.SANDSTONE, BlockType.GRAVEL, BlockType.CLAY, BlockType.MYCELIUM,
+  BlockType.PODZOL, BlockType.RED_SAND, BlockType.TERRACOTTA,
+]);
+const ATTACK_WARNINGS = new Set(['Aiming', 'Preparing to strike', 'About to explode']);
+const SKITTISH = new Set(['Deer', 'Rabbit', 'Fox']);
+const FLYERS = new Set(['Phantom', 'Blaze', 'Wraith', 'Banshee', 'Dragon']);
+const SUN_SENSITIVE = new Set(['Zombie', 'Skeleton', 'Wither Skeleton', 'Vampire']);
 const KNOCKBACK_FORCE = 8;
 
 // ── Reusable temp vectors (avoid per-frame allocations) ──
+const UP = new THREE.Vector3(0, 1, 0);
+const attackOffset = new THREE.Vector3();
+
+function coveredAt(world, x, y, z) {
+  for (let height = Math.floor(y); height < CHUNK_HEIGHT; height++) {
+    if (world.isSolid(x, height, z)) return true;
+  }
+  return false;
+}
 const _tmpVec = new THREE.Vector3();
 const _tmpVec2 = new THREE.Vector3();
 const _tmpVec3 = new THREE.Vector3();
+const sightOrigin = new THREE.Vector3();
+const sightDirection = new THREE.Vector3();
+
+function clearPath(world, origin, target, targetHeight = 0) {
+  sightDirection.subVectors(target, origin);
+  sightDirection.y += targetHeight;
+  const distance = sightDirection.length();
+  return distance < 0.01 || !world.raycast(origin, sightDirection.multiplyScalar(1 / distance), distance).hit;
+}
 
 // ── Shared geometry / material caches ─────────────────────
 const _geoCache = new Map();   // key -> BufferGeometry
@@ -92,7 +142,7 @@ function _getMat(key, factory) {
 // Helper: create box mesh
 function _box(key, sx, sy, sz, color) {
   const g = _getGeo(key, () => new THREE.BoxGeometry(sx, sy, sz));
-  const m = _getMat(key, () => new THREE.MeshLambertMaterial({ color }));
+  const m = _getMat(key, () => new THREE.MeshStandardMaterial({ color, roughness: 0.82 }));
   return new THREE.Mesh(g, m);
 }
 
@@ -104,30 +154,33 @@ function _addEyes(group, x, y, z, size, color) {
   group.add(new THREE.Mesh(g, m).translateX(x).translateY(y).translateZ(z));
 }
 
-// Helper: add 4 legs (animals)
+function addLimb(group, x, y, z, width, height, color, phase) {
+  const pivot = new THREE.Group();
+  pivot.position.set(x, y + height / 2, z);
+  const limb = _box(`limb_${width}_${height}_${color}`, width, height, width, color);
+  limb.position.y = -height / 2;
+  pivot.add(limb);
+  group.add(pivot);
+  (group.userData.limbs ??= []).push({ pivot, phase });
+}
+
 function _addLegs4(group, w, legH, legW, frontZ, backZ, y, color) {
-  const g = _getGeo(`mleg${legW}${legH}`, () => new THREE.BoxGeometry(legW, legH, legW));
-  const m = _getMat(`mleg${color}`, () => new THREE.MeshLambertMaterial({ color }));
-  const xs = w * 0.3;
-  for (const [xm, zm] of [[-xs, frontZ], [xs, frontZ], [-xs, backZ], [xs, backZ]]) {
-    group.add(new THREE.Mesh(g, m).translateX(xm).translateY(y).translateZ(zm));
-  }
+  const x = w * 0.3;
+  addLimb(group, -x, y, frontZ, legW, legH, color, 1);
+  addLimb(group, x, y, frontZ, legW, legH, color, -1);
+  addLimb(group, -x, y, backZ, legW, legH, color, -1);
+  addLimb(group, x, y, backZ, legW, legH, color, 1);
 }
 
-// Helper: add 2 legs (humanoid)
 function _addLegs2(group, spacing, legH, legW, y, color) {
-  const g = _getGeo(`mleg2_${legW}${legH}`, () => new THREE.BoxGeometry(legW, legH, legW));
-  const m = _getMat(`mleg2_${color}`, () => new THREE.MeshLambertMaterial({ color }));
-  group.add(new THREE.Mesh(g, m).translateX(-spacing).translateY(y));
-  group.add(new THREE.Mesh(g, m).translateX(spacing).translateY(y));
+  addLimb(group, -spacing, y, 0, legW, legH, color, 1);
+  addLimb(group, spacing, y, 0, legW, legH, color, -1);
 }
 
-// Helper: add 2 arms (humanoid)
 function _addArms(group, spacing, armH, armW, y, color) {
-  const g = _getGeo(`marm_${armW}${armH}`, () => new THREE.BoxGeometry(armW, armH, armW));
-  const m = _getMat(`marm_${color}`, () => new THREE.MeshLambertMaterial({ color }));
-  group.add(new THREE.Mesh(g, m).translateX(-spacing).translateY(y));
-  group.add(new THREE.Mesh(g, m).translateX(spacing).translateY(y));
+  addLimb(group, -spacing, y, 0, armW, armH, color, -1);
+  addLimb(group, spacing, y, 0, armW, armH, color, 1);
+  for (const arm of group.userData.limbs.slice(-2)) arm.isArm = true;
 }
 
 // Fallback generic mob
@@ -321,8 +374,16 @@ MOB_BUILDERS['Spider'] = (g) => {
   const lm = _getMat('spi_leg', () => new THREE.MeshLambertMaterial({ color: 0x3a2020 }));
   for (let i = 0; i < 4; i++) {
     const z = -0.15 + i * 0.1;
-    const ll = new THREE.Mesh(lg, lm); ll.position.set(-0.5, 0.2, z); ll.rotation.z = 0.4; g.add(ll);
-    const lr = new THREE.Mesh(lg, lm); lr.position.set(0.5, 0.2, z); lr.rotation.z = -0.4; g.add(lr);
+    for (const side of [-1, 1]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(side * 0.26, 0.29, z);
+      const leg = new THREE.Mesh(lg, lm);
+      leg.position.set(side * 0.22, -0.08, 0);
+      leg.rotation.z = -side * 0.45;
+      pivot.add(leg);
+      g.add(pivot);
+      (g.userData.spiderLegs ??= []).push({ pivot, phase: side * (i % 2 === 0 ? 1 : -1) });
+    }
   }
 };
 
@@ -355,13 +416,24 @@ MOB_BUILDERS['Witch'] = (g) => {
   _addLegs2(g, 0.12, 0.5, 0.15, 0.25, 0x4a2a5a);
 };
 
+function addWings(group, geometry, material, x, y, span) {
+  group.userData.wings = [-1, 1].map(sign => {
+    const pivot = new THREE.Group();
+    pivot.position.set(sign * x, y, 0);
+    const wing = new THREE.Mesh(geometry, material);
+    wing.position.x = sign * span / 2;
+    pivot.add(wing);
+    group.add(pivot);
+    return { pivot, sign };
+  });
+}
+
 MOB_BUILDERS['Phantom'] = (g) => {
   const body = _box('pha_body', 0.3, 0.15, 0.6, 0x4466aa); body.position.set(0, 0.2, 0); g.add(body);
   // Wings
   const wg = _getGeo('pha_wing', () => new THREE.BoxGeometry(0.6, 0.04, 0.35));
   const wm = _getMat('pha_wing', () => new THREE.MeshLambertMaterial({ color: 0x3355aa, transparent: true, opacity: 0.8 }));
-  g.add(new THREE.Mesh(wg, wm).translateX(-0.4).translateY(0.22));
-  g.add(new THREE.Mesh(wg, wm).translateX(0.4).translateY(0.22));
+  addWings(g, wg, wm, 0.11, 0.22, 0.60);
   _addEyes(g, 0.06, 0.24, 0.3, 0.04, 0x44ff44);
 };
 
@@ -564,8 +636,7 @@ MOB_BUILDERS['Dragon'] = (g) => {
   // Wings
   const wg = _getGeo('drg_wing', () => new THREE.BoxGeometry(1.5, 0.05, 1.0));
   const wm = _getMat('drg_wing', () => new THREE.MeshLambertMaterial({ color: 0x3a0a5a, transparent: true, opacity: 0.7 }));
-  g.add(new THREE.Mesh(wg, wm).translateX(-1.2).translateY(1.8));
-  g.add(new THREE.Mesh(wg, wm).translateX(1.2).translateY(1.8));
+  addWings(g, wg, wm, 0.53, 1.8, 1.5);
   // Tail
   const tail = _box('drg_tail', 0.3, 0.3, 1.0, 0x2a0a4a); tail.position.set(0, 1.1, -1.0); g.add(tail);
   // Legs
@@ -591,6 +662,49 @@ MOB_BUILDERS['Elder Guardian'] = (g) => {
   const tail = _box('eg_tail', 0.5, 0.4, 0.1, 0x5a8a7a); tail.position.set(0, 0.5, -0.55); g.add(tail);
 };
 
+const MODEL_DETAILS = {
+  Cow: [
+    [0.34, 0.18, 0.58, -0.23, 0.82, -0.12, 0xfcdec0],
+    [0.10, 0.055, 0.14, -0.22, 1.14, 0.36, 0xc58c70],
+    [0.10, 0.055, 0.14, 0.22, 1.14, 0.36, 0xc58c70],
+  ],
+  Pig: [
+    [0.095, 0.13, 0.075, -0.12, 0.87, 0.28, 0xce788b],
+    [0.095, 0.13, 0.075, 0.12, 0.87, 0.28, 0xce788b],
+  ],
+  Sheep: [
+    [0.23, 0.16, 0.35, -0.24, 0.92, -0.1, 0xfff1d2],
+    [0.29, 0.18, 0.33, 0.15, 0.93, 0.09, 0xfff5dd],
+  ],
+  Fox: [
+    [0.20, 0.16, 0.19, 0, 0.41, -0.49, 0xffead1],
+    [0.20, 0.084, 0.1, 0, 0.51, 0.38, 0xffead1],
+  ],
+  Deer: [
+    [0.025, 0.08, 0.07, -0.306, 0.96, -0.18, 0xffe2ad],
+    [0.025, 0.08, 0.07, 0.306, 0.96, -0.18, 0xffe2ad],
+    [0.14, 0.19, 0.12, 0, 0.89, -0.39, 0xf9dfaf],
+  ],
+  Zombie: [
+    [0.31, 0.13, 0.035, 0.07, 1.08, 0.155, 0x32666a],
+    [0.14, 0.21, 0.035, -0.13, 1.24, 0.16, 0x658044],
+  ],
+  Creeper: [
+    [0.18, 0.35, 0.06, 0.10, 0.68, 0.20, 0x689543],
+    [0.19, 0.19, 0.06, -0.10, 0.43, 0.21, 0x23573e],
+  ],
+  Skeleton: [
+    [0.37, 0.065, 0.07, 0, 1.18, 0.155, 0xffe4bc],
+    [0.34, 0.065, 0.07, 0, 1.06, 0.15, 0xe0c698],
+    [0.30, 0.065, 0.07, 0, 0.94, 0.15, 0xe0c698],
+  ],
+  'Dark Knight': [
+    [0.21, 0.15, 0.30, -0.29, 1.38, 0, 0x65728c],
+    [0.21, 0.15, 0.30, 0.29, 1.38, 0, 0x65728c],
+    [0.12, 0.28, 0.07, 0, 1.12, 0.19, 0xc98e50],
+  ],
+};
+
 class Mob {
   constructor(type, category, position, world) {
     this.type = type;
@@ -605,6 +719,7 @@ class Mob {
     this.position = position.clone();
     this.velocity = new THREE.Vector3(0, 0, 0);
     this.onGround = false;
+    this.simTime = 0;
 
     // AI
     this.aiTimer = 0;
@@ -612,7 +727,13 @@ class Mob {
       Math.random() * 2 - 1, 0, Math.random() * 2 - 1
     ).normalize();
     this.wanderTime = 2 + Math.random() * 3;
-    this.idleTime = 0;
+    this.gait = Math.random() * Math.PI * 2;
+    this.lastSeen = position.clone();
+    this.alertTime = 0;
+    this.knockbackTime = 0;
+    this.windup = 0;
+    this.intent = 'Roaming';
+    this.pack = null;
     this.attackCooldown = 0;
     this.hurtTimer = 0;
     this._flashing = false;
@@ -624,7 +745,8 @@ class Mob {
     this.fusing = false;
     // Boss special
     this.isBoss = !!type.boss;
-    this.specialTimer = 0;
+    this.shadeTimer = 0;
+    this.shadeDirection = new THREE.Vector3();
 
     // Visual - build a simple box mob
     this.mesh = this._buildMesh();
@@ -634,11 +756,12 @@ class Mob {
     this.mesh.traverse(c => {
       if (c.isMesh && c.material) {
         c.material = c.material.clone();
+        if (c !== this._hpBar && c !== this._hpBarBg && !c.material.transparent) {
+          c.castShadow = true;
+          c.receiveShadow = true;
+        }
       }
     });
-
-    // Name label
-    this.label = null;
 
     // Flee direction for animals hit by player
     this.fleeing = false;
@@ -660,6 +783,12 @@ class Mob {
       _buildGenericMob(group, this.type, this.category);
     }
 
+    (MODEL_DETAILS[name] ?? []).forEach(([sx, sy, sz, x, y, z, color], index) => {
+      const detail = _box(`detail_${name}_${index}`, sx, sy, sz, color);
+      detail.position.set(x, y, z);
+      group.add(detail);
+    });
+
     // HP bar
     const barW = w;
     const barGeo = _getGeo(`hpbg_${name}`, () => new THREE.PlaneGeometry(barW, 0.08));
@@ -674,29 +803,32 @@ class Mob {
     hpBar.position.y = h + 0.3;
     group.add(hpBar);
     this._hpBar = hpBar;
-    this._hpBarWidth = barW;
+    barBg.visible = hpBar.visible = false;
 
     return group;
   }
 
   takeDamage(amount, knockbackDir) {
+    if (!this.alive) return;
     this.hp = Math.max(0, this.hp - amount);
     this.hurtTimer = 0.2;
 
     // Knockback (reuse temp vector)
     if (knockbackDir) {
       _tmpVec.copy(knockbackDir).normalize().multiplyScalar(KNOCKBACK_FORCE);
+      this.knockbackTime = 0.18;
+      this.windup = 0;
       this.velocity.x += _tmpVec.x;
       this.velocity.y += 4;
       this.velocity.z += _tmpVec.z;
     }
 
     // Flash red — only set if not already flashing
-    if (!this._flashing) {
+    if (!this.reducedMotion && !this._flashing) {
       this._flashing = true;
       this.mesh.traverse((c) => {
         if (c.isMesh && c.material && c !== this._hpBar && c !== this._hpBarBg) {
-          if (!c.material._origColor) c.material._origColor = c.material.color.getHex();
+          if (c.material._origColor === undefined) c.material._origColor = c.material.color.getHex();
           c.material.color.setHex(0xff0000);
         }
       });
@@ -715,6 +847,10 @@ class Mob {
       this.fleeTimer = 4;
       if (knockbackDir) {
         this.wanderDir.copy(knockbackDir).normalize();
+        if (this.pack) {
+          this.pack.alarm.copy(this.wanderDir);
+          this.pack.until = this.simTime + 2.5;
+        }
       }
     }
   }
@@ -739,12 +875,14 @@ class Mob {
     return drops;
   }
 
-  update(dt, playerPos, isNight) {
+  update(dt, playerPos, isNight, reducedMotion, simTime, playerMoving) {
+    this.reducedMotion = reducedMotion;
+    this.simTime = simTime;
     if (!this.alive) {
       this.deathTimer -= dt;
       // Sink into ground
       this.mesh.position.y -= dt * 2;
-      this.mesh.rotation.z += dt * 3;
+      if (!reducedMotion) this.mesh.rotation.z += dt * 3;
       return this.deathTimer > 0;
     }
 
@@ -764,36 +902,76 @@ class Mob {
     this.attackCooldown = Math.max(0, this.attackCooldown - dt);
 
     // AI behavior (use temp vectors — no allocations)
+    this.nearestPlayerY = playerPos.y;
     _tmpVec.subVectors(playerPos, this.position);
     _tmpVec.y = 0;
     const distToPlayer = _tmpVec.length();
 
-    if (this.category === MOB_CATEGORY.MONSTER) {
-      this._monsterAI(dt, _tmpVec, distToPlayer, playerPos);
+    this.knockbackTime = Math.max(0, this.knockbackTime - dt);
+    if (this.knockbackTime > 0) {
+      this.intent = 'Staggered';
+    } else if (this.category === MOB_CATEGORY.MONSTER) {
+      this._monsterAI(dt, _tmpVec, distToPlayer, playerPos, isNight);
     } else if (this.isNPC) {
       this._npcAI(dt);
     } else {
-      this._animalAI(dt, _tmpVec, distToPlayer);
+      this._animalAI(dt, _tmpVec, distToPlayer, playerMoving);
     }
 
     // Gravity
-    this.velocity.y += -24 * dt;
+    const flying = FLYERS.has(this.type.name);
+    const swimming = this.world.getBlock(Math.floor(this.position.x), Math.floor(this.position.y + 0.2), Math.floor(this.position.z)) === BlockType.WATER;
+    if (swimming) {
+      this.velocity.y = Math.min(3, this.velocity.y + 16 * dt);
+      this.velocity.x *= 0.65;
+      this.velocity.z *= 0.65;
+    } else if (flying && this.knockbackTime === 0) {
+      const ground = this.world.generator.getHeight(this.position.x, this.position.z, this.world.generator.getBiome(this.position.x, this.position.z));
+      const engaged = this.intent === 'Chasing' || this.intent === 'Preparing to strike';
+      const desired = engaged && distToPlayer < 8 ? Math.max(ground + 1.8, playerPos.y + 0.25) : ground + 4;
+      this.velocity.y = THREE.MathUtils.clamp((desired - this.position.y) * 2, -4, 5);
+    } else {
+      this.velocity.y -= 24 * dt;
+    }
 
-    // Move with simple collision
-    this._moveWithCollision(dt);
+    // Keep fast creatures and knockback from stepping through thin ledges.
+    const steps = Math.ceil(dt / 0.034);
+    for (let step = 0; step < steps; step++) this._moveWithCollision(dt / steps);
 
     // Update mesh
     this.mesh.position.copy(this.position);
 
     // Face movement direction
     if (Math.abs(this.velocity.x) > 0.1 || Math.abs(this.velocity.z) > 0.1) {
-      this.mesh.rotation.y = Math.atan2(this.velocity.x, this.velocity.z);
+      const heading = Math.atan2(this.velocity.x, this.velocity.z);
+      const delta = Math.atan2(Math.sin(heading - this.mesh.rotation.y), Math.cos(heading - this.mesh.rotation.y));
+      this.mesh.rotation.y += delta * Math.min(1, dt * 12);
+    }
+
+    const pace = Math.hypot(this.velocity.x, this.velocity.z);
+    this.gait = (this.gait + pace * dt * 7) % (Math.PI * 2);
+    for (const { pivot, phase, isArm } of this.mesh.userData.limbs ?? []) {
+      const stride = Math.sin(this.gait) * phase * Math.min(0.72, pace * 0.26);
+      const attackPose = isArm && this.windup > 0 ? -0.85 - this.windup * 0.8 : null;
+      pivot.rotation.x = attackPose ?? (reducedMotion ? 0 : stride);
+    }
+    for (const { pivot, sign } of this.mesh.userData.wings ?? []) {
+      pivot.rotation.z = reducedMotion ? 0 : sign * Math.sin(simTime * 5 + this.gait) * 0.4;
+    }
+    for (const { pivot, phase } of this.mesh.userData.spiderLegs ?? []) {
+      pivot.rotation.y = reducedMotion ? 0 : Math.sin(this.gait) * phase * Math.min(0.42, pace * 0.2);
+    }
+    if (this.type.name === 'Creeper') {
+      this.mesh.scale.setScalar(reducedMotion ? 1 : 1 + this.fuseTimer * 0.13);
+    } else if (this.type.name === 'Slime') {
+      const squash = reducedMotion ? 0 : THREE.MathUtils.clamp(this.velocity.y * 0.025, -0.17, 0.17);
+      this.mesh.scale.set(1 - squash * 0.5, 1 + squash, 1 - squash * 0.5);
     }
 
     // Update HP bar
     const hpFrac = this.hp / this.maxHp;
     this._hpBar.scale.x = Math.max(0.01, hpFrac);
-    this._hpBar.position.x = -this._hpBarWidth * (1 - hpFrac) / 2;
+    this._hpBar.position.copy(this._hpBarBg.position);
     this._hpBarBg.visible = this.hp < this.maxHp;
     this._hpBar.visible = this.hp < this.maxHp;
 
@@ -802,107 +980,147 @@ class Mob {
     return true; // still active
   }
 
-  _monsterAI(dt, toPlayer, distToPlayer, playerPos) {
+  _monsterAI(dt, toPlayer, distance, playerPos, isNight) {
     this.shootCooldown = Math.max(0, this.shootCooldown - dt);
-
-    // Skeleton: ranged attack — stop and shoot arrows from distance
-    if (this.type.name === 'Skeleton' && distToPlayer < 20 && distToPlayer > 5 && this.shootCooldown <= 0) {
-      this.shootCooldown = 2.5;
-      this.velocity.x *= 0.3;
-      this.velocity.z *= 0.3;
-      // Signal arrow shot — handled by MobManager
-      const targetPos = playerPos.clone();
-      targetPos.y += 1.5;
-      this._pendingProjectile = { target: targetPos, damage: this.type.damage };
-      return;
+    this.alertTime = Math.max(0, this.alertTime - dt);
+    const name = this.type.name;
+    const heightGap = Math.abs(playerPos.y - this.position.y);
+    const nearStrikeHeight = Math.abs(playerPos.y + 0.8 - this.position.y - this.type.h * 0.65) < 1.35;
+    const seesPlayer = distance < 28 && heightGap < 10 &&
+      clearPath(this.world, sightOrigin.copy(this.position).addScaledVector(UP, this.type.h * 0.75), playerPos, 0.9);
+    if (seesPlayer) {
+      this.lastSeen.copy(playerPos);
+      this.alertTime = 3.5;
     }
 
-    // Creeper: approach + fuse
-    if (this.type.name === 'Creeper') {
-      if (distToPlayer < 3) {
-        this.fusing = true;
-        this.fuseTimer += dt;
-        this.velocity.x *= 0.2;
-        this.velocity.z *= 0.2;
-        // Flash white when fusing
-        if (Math.floor(this.fuseTimer * 4) % 2 === 0 && !this._flashing) {
-          this.mesh.traverse((c) => {
-            if (c.isMesh && c.material && c !== this._hpBar && c !== this._hpBarBg) {
-              if (!c.material._origColor) c.material._origColor = c.material.color.getHex();
-              c.material.color.setHex(0xffffff);
-            }
-          });
-        }
+    if (name === 'Creeper') {
+      this.fusing = seesPlayer && distance < 2.8 && heightGap < 2;
+      this.fuseTimer = THREE.MathUtils.clamp(this.fuseTimer + (this.fusing ? dt : -dt * 2), 0, 1.5);
+      if (this.fusing) {
+        this.intent = 'About to explode';
+        this._face(toPlayer);
         if (this.fuseTimer >= 1.5) {
-          // Explode!
           this._pendingExplosion = { radius: 3, damage: this.type.damage };
           this.alive = false;
           this.deathTimer = 0.1;
         }
         return;
-      } else {
-        if (this.fusing) {
-          this.fuseTimer = Math.max(0, this.fuseTimer - dt * 2);
-          if (this.fuseTimer <= 0) this.fusing = false;
+      }
+    }
+
+    if (!isNight && this.onFire && SUN_SENSITIVE.has(name)) {
+      this.intent = 'Seeking shade';
+      this.windup = 0;
+      this.shadeTimer -= dt;
+      if (this.shadeTimer <= 0) {
+        this.shadeTimer = 0.6;
+        this.shadeDirection.set(0, 0, 0);
+        for (let i = 0; i < 8; i++) {
+          const heading = i * Math.PI / 4;
+          const x = Math.cos(heading);
+          const z = Math.sin(heading);
+          if (this._stepAhead(x, z, true) < 0) continue;
+          if (coveredAt(this.world, this.position.x + x * 4, this.position.y + this.type.h, this.position.z + z * 4)) {
+            this.shadeDirection.set(x, 0, z);
+            break;
+          }
         }
       }
+      if (this.shadeDirection.lengthSq()) this._steer(this.shadeDirection, this.type.speed, true);
+      else this._wander(dt, 0.9);
+      return;
     }
 
-    // Chase player
-    if (distToPlayer < 40 && distToPlayer > 1.2) {
-      _tmpVec2.copy(toPlayer).normalize();
-      const speedMult = this.isBoss ? 0.8 : 1.0;
-      this.velocity.x = _tmpVec2.x * this.type.speed * speedMult;
-      this.velocity.z = _tmpVec2.z * this.type.speed * speedMult;
-
-      // Jump if blocked
-      if (this.onGround && this._isBlockedAhead(_tmpVec2)) {
-        this.velocity.y = 7;
-      }
-    } else if (distToPlayer <= 1.2) {
-      this.velocity.x *= 0.5;
-      this.velocity.z *= 0.5;
-    } else {
-      this._wander(dt);
-    }
-  }
-
-  _animalAI(dt, toPlayer, distToPlayer) {
-    // Flee if recently hit
-    if (this.fleeing) {
-      this.fleeTimer -= dt;
-      if (this.fleeTimer <= 0) {
-        this.fleeing = false;
-      } else {
-        this.velocity.x = this.wanderDir.x * this.type.speed * 2;
-        this.velocity.z = this.wanderDir.z * this.type.speed * 2;
-        if (this.onGround && this._isBlockedAhead(this.wanderDir)) {
-          this.velocity.y = 7;
+    const ranged = name === 'Skeleton' && distance >= 4 && distance < 19;
+    const melee = name !== 'Creeper' && distance < 1.65 && nearStrikeHeight;
+    if (seesPlayer && (ranged || melee)) {
+      this._face(toPlayer);
+      this.intent = ranged ? 'Aiming' : 'Preparing to strike';
+      const cooldown = ranged ? this.shootCooldown : this.attackCooldown;
+      if (cooldown <= 0) {
+        this.windup += dt;
+        if (this.windup >= (ranged ? 0.65 : 0.4)) {
+          this.windup = 0;
+          if (ranged) {
+            this.shootCooldown = 2.5;
+            const target = playerPos.clone();
+            target.y += 0.85;
+            this._pendingProjectile = { target, damage: this.type.damage };
+          } else {
+            this.attackCooldown = ATTACK_COOLDOWN;
+            this._pendingAttack = this.type.damage;
+          }
         }
-        return;
-      }
-    }
-
-    // Flee if player very close
-    if (distToPlayer < 5) {
-      _tmpVec2.copy(toPlayer).negate().normalize();
-      this.velocity.x = _tmpVec2.x * this.type.speed * 1.5;
-      this.velocity.z = _tmpVec2.z * this.type.speed * 1.5;
-      if (this.onGround && this._isBlockedAhead(_tmpVec2)) {
-        this.velocity.y = 7;
       }
       return;
     }
 
+    this.windup = 0;
+    if (this.alertTime > 0) {
+      this.intent = seesPlayer ? 'Chasing' : 'Searching';
+      _tmpVec2.subVectors(this.lastSeen, this.position).setY(0);
+      if (_tmpVec2.lengthSq() > 0.5) {
+        const stalking = name === 'Werewolf' && seesPlayer && distance > 8;
+        const retreating = name === 'Skeleton' && seesPlayer && distance < 4 && !melee;
+        if (stalking) this.intent = 'Stalking';
+        if (retreating) this.intent = 'Backing away';
+        const direction = _tmpVec2.normalize().multiplyScalar(retreating ? -1 : 1);
+        this._steer(direction, this.type.speed * (stalking ? 0.65 : 1), true);
+      } else {
+        this._wander(dt);
+      }
+    } else {
+      this.intent = 'Roaming';
+      this._wander(dt);
+    }
+  }
+
+  _face(direction) {
+    this.velocity.x = 0;
+    this.velocity.z = 0;
+    this.mesh.rotation.y = Math.atan2(direction.x, direction.z);
+  }
+
+  _animalAI(dt, toPlayer, distance, playerMoving) {
+    this.fleeTimer = Math.max(0, this.fleeTimer - dt);
+    this.fleeing = this.fleeTimer > 0;
+    const skittish = SKITTISH.has(this.type.name);
+    const near = Math.abs(this.position.y - this.nearestPlayerY) < 3;
+    const seesPlayer = near && distance < 8 &&
+      clearPath(this.world, sightOrigin.copy(this.position).addScaledVector(UP, this.type.h * 0.7), playerPos, 0.85);
+    const heardSprint = near && skittish && playerMoving && distance < 8;
+    const startled = heardSprint || (seesPlayer && distance < (skittish ? 4 : 2));
+    if (startled || this.fleeing || this.pack?.until > this.simTime) {
+      this.intent = 'Fleeing';
+      if (startled) _tmpVec2.copy(toPlayer).negate().normalize();
+      else _tmpVec2.copy(this.fleeing ? this.wanderDir : this.pack.alarm);
+      this._steer(_tmpVec2, this.type.speed * 1.55, true);
+      return;
+    }
+    if (seesPlayer && distance < 7) {
+      this.intent = 'Watching';
+      this._face(toPlayer);
+      return;
+    }
+    if (this.pack) {
+      _tmpVec2.subVectors(this.pack.home, this.position).setY(0);
+      if (_tmpVec2.lengthSq() > 12 ** 2) {
+        this.intent = 'Returning to herd';
+        this._steer(_tmpVec2.normalize(), this.type.speed * 0.65, true);
+        return;
+      }
+    }
+    this.intent = this.wanderDir.lengthSq() > 0 ? 'Foraging' : 'Resting';
     this._wander(dt);
   }
 
   _npcAI(dt) {
     // NPCs just wander slowly within a small area
+    this.intent = 'Roaming';
     this._wander(dt);
   }
 
-  _wander(dt) {
+  _wander(dt, pace = 0.4) {
     this.aiTimer += dt;
     if (this.aiTimer > this.wanderTime) {
       this.aiTimer = 0;
@@ -915,19 +1133,53 @@ class Mob {
       }
     }
 
-    this.velocity.x = this.wanderDir.x * this.type.speed * 0.4;
-    this.velocity.z = this.wanderDir.z * this.type.speed * 0.4;
-
-    if (this.onGround && this.wanderDir.lengthSq() > 0 && this._isBlockedAhead(this.wanderDir)) {
-      this.velocity.y = 7;
-    }
+    this._steer(this.wanderDir, this.type.speed * pace, true);
   }
 
-  _isBlockedAhead(dir) {
-    const checkX = Math.floor(this.position.x + dir.x * 0.8);
-    const checkY = Math.floor(this.position.y + 0.5);
-    const checkZ = Math.floor(this.position.z + dir.z * 0.8);
-    return this.world.isSolid(checkX, checkY, checkZ);
+  _steer(direction, speed, cautious) {
+    let x = direction.x;
+    let z = direction.z;
+    if (this.onGround && (x || z)) {
+      let step = this._stepAhead(x, z, cautious);
+      if (step < 0) {
+        const sign = Math.sin(this.gait) < 0 ? -1 : 1;
+        const sideX = z * sign;
+        const sideZ = -x * sign;
+        step = this._stepAhead(sideX, sideZ, cautious);
+        x = sideX;
+        z = sideZ;
+        if (step < 0) {
+          step = this._stepAhead(-x, -z, cautious);
+          x = -x;
+          z = -z;
+        }
+      }
+      if (step < 0) x = z = 0;
+      const hopping = (x || z) && ((this.type.name === 'Rabbit' && speed > 2) || this.type.name === 'Slime');
+      if (step > 0 || hopping) {
+        this.velocity.y = step > 0 ? (this.type.name === 'Spider' ? 9 : 7.6) : 5.8;
+      }
+    }
+    this.velocity.x = x * speed;
+    this.velocity.z = z * speed;
+  }
+
+  _stepAhead(dx, dz, cautious) {
+    const reach = this.type.w / 2 + 0.46;
+    const x = Math.floor(this.position.x + dx * reach);
+    const y = Math.floor(this.position.y + 0.2);
+    const z = Math.floor(this.position.z + dz * reach);
+    if (!this.world.getChunk(Math.floor(x / CHUNK_SIZE), Math.floor(z / CHUNK_SIZE))?.generated) return -1;
+    const block = this.world.getBlock(x, y, z);
+    if (block === BlockType.LAVA || (cautious && block === BlockType.WATER)) return -1;
+    if (this.world.isSolid(x, y, z)) {
+      for (let layer = 1; layer <= Math.ceil(this.type.h); layer++) {
+        if (this.world.isSolid(x, y + layer, z)) return -1;
+      }
+      return 1;
+    }
+    if (cautious && !this.world.isSolid(x, y - 1, z) && !this.world.isSolid(x, y - 2, z)) return -1;
+    return 0;
   }
 
   _moveWithCollision(dt) {
@@ -978,7 +1230,9 @@ class Mob {
 
   dispose(scene) {
     scene.remove(this.mesh);
-    // Geometries & materials are shared — don't dispose them per mob
+    this.mesh.traverse(child => {
+      if (child.isMesh) child.material.dispose();
+    });
   }
 }
 
@@ -990,20 +1244,25 @@ export class MobManager {
     this.world = world;
     this.mobs = [];
     this.spawnTimer = 0;
+    this.spawnAroundSecondPlayer = false;
+    this.simTime = 0;
+    this.pendingArrowDamage = [0, 0];
     this.playerAttackCooldown = 0;
     this.burnTimer = 0;
     this.projectiles = []; // arrow projectiles
     this.pendingDrops = []; // items to give player
-    this.pendingExplosionDamage = 0;
+    this.pendingExplosionDamage = [0, 0];
+    this.pendingMeleeDamage = [0, 0];
     this.bossSpawnTimer = 0;
     this._npcSpawnedChunks = new Set(); // track which chunks have had NPCs spawned
   }
 
-  update(dt, playerPos, isNight, camera) {
+  update(dt, playerPos, isNight, camera, { peaceful = false, reducedMotion = false, playerMoving = false, secondPlayer = null } = {}) {
+    this.simTime += dt;
     this.spawnTimer += dt;
     this.playerAttackCooldown = Math.max(0, this.playerAttackCooldown - dt);
     this.burnTimer += dt;
-    if (isNight) {
+    if (isNight && !peaceful) {
       this.bossSpawnTimer += dt;
     }
     const doBurn = this.burnTimer >= 0.5;
@@ -1012,53 +1271,61 @@ export class MobManager {
     // Spawn mobs periodically
     if (this.spawnTimer >= SPAWN_INTERVAL) {
       this.spawnTimer = 0;
-      this._trySpawn(playerPos, isNight);
+      const aroundSecond = secondPlayer && this.spawnAroundSecondPlayer;
+      this._trySpawn(aroundSecond ? secondPlayer : playerPos, isNight && !peaceful, aroundSecond ? playerPos : secondPlayer);
+      if (secondPlayer) this.spawnAroundSecondPlayer = !this.spawnAroundSecondPlayer;
     }
 
     // Rare boss spawn (every 5 minutes of nighttime)
-    if (isNight && this.bossSpawnTimer >= 300) {
+    if (isNight && !peaceful && this.bossSpawnTimer >= 300) {
       this.bossSpawnTimer = 0;
       this._trySpawnBoss(playerPos);
     }
 
-    this.pendingExplosionDamage = 0;
+    this.pendingExplosionDamage.fill(0);
+    this.pendingMeleeDamage.fill(0);
+    if (peaceful && this.projectiles.length) {
+      for (const projectile of this.projectiles) this.scene.remove(projectile.mesh);
+      this.projectiles.length = 0;
+    }
 
     // Update all mobs
     for (let i = this.mobs.length - 1; i >= 0; i--) {
       const mob = this.mobs[i];
 
-      // Despawn if too far (but not bosses)
-      const dist = mob.position.distanceTo(playerPos);
-      if (dist > DESPAWN_RADIUS && !mob.isBoss && !mob.isNPC) {
+      const dist = mob.position.distanceToSquared(playerPos);
+      const secondDist = secondPlayer ? mob.position.distanceToSquared(secondPlayer) : Infinity;
+      const target = secondDist < dist ? 1 : 0;
+      if ((!mob.isTNT && Math.min(dist, secondDist) > (mob.isBoss ? 110 : DESPAWN_RADIUS) ** 2) ||
+          (peaceful && mob.category === MOB_CATEGORY.MONSTER)) {
+        if (mob.isNPC && mob.alive) this._npcSpawnedChunks.delete(mob.npcChunkKey);
         mob.dispose(this.scene);
         this.mobs.splice(i, 1);
         continue;
+      }
+      if (mob.targetPlayer !== target) {
+        mob.windup = 0;
+        mob.targetPlayer = target;
       }
 
       // Check if burning (daylight or lava)
       let burning = false;
       const blockId = this.world.getBlock(Math.floor(mob.position.x), Math.floor(mob.position.y), Math.floor(mob.position.z));
       if (blockId === BlockType.LAVA) burning = true;
-      if (!isNight && mob.category === MOB_CATEGORY.MONSTER && mob.alive && !mob.isBoss) {
-        burning = true;
+      if (!isNight && SUN_SENSITIVE.has(mob.type.name)) {
+        burning ||= !coveredAt(this.world, mob.position.x, mob.position.y + mob.type.h, mob.position.z);
       }
       
       mob.onFire = burning;
+      mob.reducedMotion = reducedMotion;
 
-      if (burning && mob.alive) {
-        if (doBurn) {
-          mob.takeDamage(1, null);
-        }
+      if (burning && mob.alive && doBurn && !mob.isTNT) mob.takeDamage(1, null);
+
+      const active = mob.update(dt, target ? secondPlayer : playerPos, isNight, reducedMotion, this.simTime, !target && playerMoving);
+      if (mob._pendingAttack) {
+        this.pendingMeleeDamage[target] += mob._pendingAttack;
+        mob._pendingAttack = 0;
       }
-
-      // Despawn night animals
-      if (isNight && mob.category === MOB_CATEGORY.ANIMAL && mob.alive && dist > 40) {
-        mob.dispose(this.scene);
-        this.mobs.splice(i, 1);
-        continue;
-      }
-
-      const active = mob.update(dt, playerPos, isNight);
 
       // Handle projectile from skeleton
       if (mob._pendingProjectile) {
@@ -1069,10 +1336,8 @@ export class MobManager {
       // Handle creeper explosion
       if (mob._pendingExplosion) {
         const expl = mob._pendingExplosion;
-        const distToPlayer = mob.position.distanceTo(playerPos);
-        if (distToPlayer < expl.radius) {
-          this.pendingExplosionDamage += expl.damage;
-        }
+        if (mob.position.distanceToSquared(playerPos) < expl.radius ** 2) this.pendingExplosionDamage[0] += expl.damage;
+        if (secondPlayer && mob.position.distanceToSquared(secondPlayer) < expl.radius ** 2) this.pendingExplosionDamage[1] += expl.damage;
         // Destroy blocks in radius
         this._explodeBlocks(mob.position, expl.radius);
         mob._pendingExplosion = null;
@@ -1092,33 +1357,42 @@ export class MobManager {
         continue;
       }
 
-      // Monster attacks player
-      if (mob.category === MOB_CATEGORY.MONSTER && mob.alive && mob.attackCooldown <= 0) {
-        _tmpVec.subVectors(playerPos, mob.position);
-        if (_tmpVec.length() < 1.5) {
-          mob.attackCooldown = ATTACK_COOLDOWN;
-          mob._pendingAttack = mob.type.damage;
-        }
-      }
-
       // Billboard HP bars to face camera
-      if (camera && (mob._hpBar.visible || mob._hpBarBg.visible)) {
-        mob._hpBar.lookAt(camera.position);
+      if (camera && mob._hpBar?.visible) {
         mob._hpBarBg.lookAt(camera.position);
+        mob._hpBar.quaternion.copy(mob._hpBarBg.quaternion);
+        mob._hpBar.translateZ(0.012);
       }
     }
   }
 
   // Check and consume pending attacks from monsters
-  getPlayerDamage() {
-    let totalDamage = 0;
+  getPlayerDamage(playerIndex = 0) {
+    const damage = this.pendingMeleeDamage[playerIndex];
+    this.pendingMeleeDamage[playerIndex] = 0;
+    return damage;
+  }
+
+  describeNearby(playerPos, eye, direction) {
+    let target = null;
+    let best = 11 ** 2;
     for (const mob of this.mobs) {
-      if (mob._pendingAttack) {
-        totalDamage += mob._pendingAttack;
-        mob._pendingAttack = 0;
-      }
+      if (!mob.alive || mob.isTNT) continue;
+      const distance = mob.position.distanceToSquared(playerPos);
+      if (distance >= 11 ** 2 || Math.abs(mob.position.y - playerPos.y) > 5) continue;
+      const warning = distance < 8 ** 2 && ATTACK_WARNINGS.has(mob.intent);
+      const priority = warning ? distance - 121 : distance;
+      if (priority >= best) continue;
+      _tmpVec.subVectors(mob.position, eye);
+      _tmpVec.y += mob.type.h * 0.6;
+      const onTarget = _tmpVec.normalize().dot(direction) > 0.82;
+      if (!(warning || onTarget) || !clearPath(this.world, eye, mob.position, mob.type.h * 0.6)) continue;
+      target = mob;
+      best = priority;
     }
-    return totalDamage;
+    if (!target) return '';
+    const kind = target.isNPC ? 'Trader' : target.category === MOB_CATEGORY.MONSTER ? 'Hostile' : 'Wildlife';
+    return `${target.type.name} · ${kind} · ${target.intent}`;
   }
 
   // Player attacks (called from main on left click)
@@ -1131,7 +1405,7 @@ export class MobManager {
 
     // Find closest mob in front of player
     for (const mob of this.mobs) {
-      if (!mob.alive) continue;
+      if (!mob.alive || mob.isTNT) continue;
 
       // Distance from player to mob for reach limit
       const distFromPlayer = mob.position.distanceTo(playerPos);
@@ -1143,7 +1417,7 @@ export class MobManager {
 
       // Check angle - must be roughly in front (~75 degree cone, forgiving for 3rd person)
       const dot = _tmpVec.normalize().dot(cameraDir);
-      if (dot < 0.25) continue;
+      if (dot < 0.25 || !clearPath(this.world, cameraPos, mob.position, mob.type.h * 0.5)) continue;
 
       if (distFromPlayer < closestDist) {
         closestDist = distFromPlayer;
@@ -1160,43 +1434,82 @@ export class MobManager {
     return false;
   }
 
-  _trySpawn(playerPos, isNight) {
+  _trySpawn(playerPos, isNight, otherPlayer = null) {
     if (this.mobs.length >= MAX_MOBS) return;
+    const counts = this.getMobCount();
+    const remaining = isNight ? 18 - counts.monsters : 21 - counts.animals;
+    if (remaining <= 0) return;
 
-    // Choose category based on time
     const category = isNight ? MOB_CATEGORY.MONSTER : MOB_CATEGORY.ANIMAL;
-    const typeList = category === MOB_CATEGORY.MONSTER ? MONSTER_TYPES : ANIMAL_TYPES;
-    const type = typeList[Math.floor(Math.random() * typeList.length)];
+    const species = isNight ? MONSTER_TYPES : ANIMAL_TYPES;
+    for (let attempt = 0; attempt < 7; attempt++) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = SPAWN_RADIUS_MIN + Math.random() * (SPAWN_RADIUS_MAX - SPAWN_RADIUS_MIN);
+      const x = Math.floor(playerPos.x + Math.cos(angle) * distance) + 0.5;
+      const z = Math.floor(playerPos.z + Math.sin(angle) * distance) + 0.5;
+      if (otherPlayer && Math.hypot(x - otherPlayer.x, z - otherPlayer.z) < SPAWN_RADIUS_MIN + 4) continue;
+      const biome = this.world.generator.getBiome(x, z);
+      const names = isNight
+        ? NIGHT_HABITAT[biome] ?? COMMON_MONSTERS
+        : HABITAT[biome];
+      if (!names) continue;
+      const r = Math.random();
+      const candidates = isNight && r < 0.18 ? species :
+        species.filter(entry => (isNight && r < 0.56 ? COMMON_MONSTERS : names).includes(entry.name));
+      const type = candidates[Math.floor(Math.random() * candidates.length)];
+      const y = this._findGround(x, z, type, true);
+      if (y < 0 || Math.abs(y - playerPos.y) > 15 || this._nearMob(x, y, z, 3)) continue;
 
-    // Pick spawn position in a ring around player
-    const angle = Math.random() * Math.PI * 2;
-    const dist = SPAWN_RADIUS_MIN + Math.random() * (SPAWN_RADIUS_MAX - SPAWN_RADIUS_MIN);
-    const sx = playerPos.x + Math.cos(angle) * dist;
-    const sz = playerPos.z + Math.sin(angle) * dist;
-
-    // Find ground level
-    const sy = this._findGround(sx, sz);
-    if (sy < 0) return; // no valid ground
-
-    const mob = new Mob(type, category, new THREE.Vector3(sx, sy, sz), this.world);
-    this.mobs.push(mob);
-    this.scene.add(mob.mesh);
+      const groupSize = isNight || type.name === 'Fox' ? 1 : Math.min(remaining, MAX_MOBS - this.mobs.length, 2 + Math.floor(Math.random() * 3));
+      const pack = groupSize > 1 ? { home: new THREE.Vector3(x, y, z), alarm: new THREE.Vector3(), until: 0 } : null;
+      this._addMob(type, category, x, y, z, pack);
+      for (let member = 1; member < groupSize; member++) {
+        const heading = angle + member * 2.4;
+        const mx = Math.floor(x + Math.cos(heading) * 4) + 0.5;
+        const mz = Math.floor(z + Math.sin(heading) * 4) + 0.5;
+        const my = this._findGround(mx, mz, type, true);
+        if (my > 0 && Math.abs(my - y) <= 3 && !this._nearMob(mx, my, mz, 2)) this._addMob(type, category, mx, my, mz, pack);
+      }
+      return;
+    }
   }
 
-  _findGround(wx, wz) {
+  _addMob(type, category, x, y, z, pack = null) {
+    const mob = new Mob(type, category, new THREE.Vector3(x, y, z), this.world);
+    mob.pack = pack;
+    mob.simTime = this.simTime;
+    this.mobs.push(mob);
+    this.scene.add(mob.mesh);
+    return mob;
+  }
+
+  _nearMob(x, y, z, distance) {
+    return this.mobs.some(mob => mob.alive && mob.position.distanceToSquared(sightOrigin.set(x, y, z)) < distance ** 2);
+  }
+
+  _findGround(wx, wz, type, naturalOnly = false) {
     const ix = Math.floor(wx);
     const iz = Math.floor(wz);
-    
-    // Check if chunk is loaded first
-    const cx = Math.floor(ix / 16);
-    const cz = Math.floor(iz / 16);
-    if (!this.world.chunks.has(`${cx},${cz}`)) return -1;
-
-    // Search from top down
-    for (let y = 100; y > 0; y--) {
-      if (this.world.isSolid(ix, y, iz) && !this.world.isSolid(ix, y + 1, iz) && !this.world.isSolid(ix, y + 2, iz)) {
-        return y + 1;
+    if (!this.world.getChunk(Math.floor(ix / CHUNK_SIZE), Math.floor(iz / CHUNK_SIZE))?.generated) return -1;
+    const biome = this.world.generator.getBiome(ix, iz);
+    const start = naturalOnly ? Math.min(CHUNK_HEIGHT - 2, this.world.generator.getHeight(ix, iz, biome) + 1) : CHUNK_HEIGHT - 2;
+    const bottom = naturalOnly ? Math.max(1, start - 4) : 1;
+    for (let y = start; y >= bottom; y--) {
+      const ground = this.world.getBlock(ix, y, iz);
+      if (naturalOnly ? !NATURAL_GROUND.has(ground) : !this.world.isSolid(ix, y, iz)) continue;
+      let clear = true;
+      const radius = type.w / 2;
+      for (const dx of [-radius, radius]) {
+        for (const dz of [-radius, radius]) {
+          for (let dy = 1; dy <= Math.ceil(type.h); dy++) {
+            const x = Math.floor(wx + dx);
+            const z = Math.floor(wz + dz);
+            const block = this.world.getBlock(x, y + dy, z);
+            if (block !== BlockType.AIR || !this.world.getChunk(Math.floor(x / CHUNK_SIZE), Math.floor(z / CHUNK_SIZE))?.generated) clear = false;
+          }
+        }
       }
+      if (clear && y + Math.ceil(type.h) < CHUNK_HEIGHT) return y + 1;
     }
     return -1;
   }
@@ -1219,77 +1532,68 @@ export class MobManager {
   }
 
   // Get explosion damage for this frame
-  getExplosionDamage() {
-    return this.pendingExplosionDamage;
+  getExplosionDamage(playerIndex = 0) {
+    return this.pendingExplosionDamage[playerIndex];
   }
 
   // Update projectiles (arrows from skeletons)
-  updateProjectiles(dt, playerPos) {
+  updateProjectiles(dt, playerPos, secondPlayer = null) {
+    this.pendingArrowDamage.fill(0);
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
-      const proj = this.projectiles[i];
-      proj.position.addScaledVector(proj.velocity, dt);
-      proj.velocity.y -= 9.8 * dt;
-      proj.life -= dt;
-      proj.mesh.position.copy(proj.position);
-
-      // Hit player
-      const distToPlayer = proj.position.distanceTo(playerPos);
-      if (distToPlayer < 1.0) {
-        this.projectiles[i]._hitPlayer = proj.damage;
-        this.scene.remove(proj.mesh);
+      const projectile = this.projectiles[i];
+      const distance = projectile.velocity.length() * dt;
+      _tmpVec.copy(projectile.velocity).normalize();
+      const hit = this.world.raycast(projectile.position, _tmpVec, distance);
+      const reach = hit.hit ? hit.distance : distance;
+      const first = this._arrowHitDistance(playerPos, projectile.position, _tmpVec, reach);
+      const second = secondPlayer ? this._arrowHitDistance(secondPlayer, projectile.position, _tmpVec, reach) : Infinity;
+      const strikesPlayer = Number.isFinite(Math.min(first, second));
+      projectile.life -= dt;
+      if (strikesPlayer || hit.hit || projectile.life <= 0) {
+        if (strikesPlayer) this.pendingArrowDamage[Number(second < first)] += projectile.damage;
+        this.scene.remove(projectile.mesh);
         this.projectiles.splice(i, 1);
         continue;
       }
-
-      // Hit ground
-      const block = this.world.getBlock(
-        Math.floor(proj.position.x),
-        Math.floor(proj.position.y),
-        Math.floor(proj.position.z)
-      );
-      if (block !== 0 && block !== undefined) {
-        this.scene.remove(proj.mesh);
-        this.projectiles.splice(i, 1);
-        continue;
-      }
-
-      if (proj.life <= 0) {
-        this.scene.remove(proj.mesh);
-        this.projectiles.splice(i, 1);
-      }
+      projectile.position.addScaledVector(projectile.velocity, dt);
+      projectile.velocity.y -= 9.8 * dt;
+      projectile.mesh.position.copy(projectile.position);
+      projectile.mesh.lookAt(_tmpVec2.copy(projectile.position).add(projectile.velocity));
     }
-    // Return total arrow damage hitting player
-    let arrowDmg = 0;
-    // Check was already spliced, so iterate separately
-    return arrowDmg;
   }
 
-  // Get arrow damage from projectiles that hit player  
-  getArrowDamage() {
-    let total = 0;
-    for (let i = this.projectiles.length - 1; i >= 0; i--) {
-      if (this.projectiles[i]._hitPlayer) {
-        total += this.projectiles[i]._hitPlayer;
-        this.scene.remove(this.projectiles[i].mesh);
-        this.projectiles.splice(i, 1);
-      }
-    }
-    return total;
+  _arrowHitDistance(player, origin, heading, reach) {
+    attackOffset.copy(player).addScaledVector(UP, 0.85).sub(origin);
+    const approach = attackOffset.dot(heading);
+    const lateral = attackOffset.lengthSq() - approach ** 2;
+    if (lateral > 0.57 ** 2) return Infinity;
+    const margin = Math.sqrt(0.57 ** 2 - lateral);
+    const entry = Math.max(0, approach - margin);
+    return approach + margin >= 0 && entry <= reach ? entry : Infinity;
+  }
+
+  getArrowDamage(playerIndex = 0) {
+    const damage = this.pendingArrowDamage[playerIndex];
+    this.pendingArrowDamage[playerIndex] = 0;
+    return damage;
   }
 
   _createProjectile(fromPos, data) {
-    const dir = _tmpVec.copy(data.target).sub(fromPos).normalize();
+    const origin = _tmpVec3.copy(fromPos).addScaledVector(UP, 1.1);
     const speed = 15;
+    const dir = _tmpVec.copy(data.target).sub(origin);
+    const flightTime = Math.hypot(dir.x, dir.z) / speed;
+    dir.y += 4.9 * flightTime ** 2;
+    dir.normalize();
     const arrowGeo = _getGeo('arrow_proj', () => new THREE.BoxGeometry(0.1, 0.1, 0.5));
     const arrowMat = _getMat('arrow_proj', () => new THREE.MeshLambertMaterial({ color: 0x8b6914 }));
     const mesh = new THREE.Mesh(arrowGeo, arrowMat);
-    mesh.position.copy(fromPos);
-    mesh.position.y += 1.0;
+    mesh.position.copy(origin);
     this.scene.add(mesh);
 
     this.projectiles.push({
       position: mesh.position.clone(),
-      velocity: dir.clone().multiplyScalar(speed).add(new THREE.Vector3(0, 2, 0)),
+      velocity: dir.clone().multiplyScalar(speed),
       mesh,
       damage: data.damage,
       life: 5,
@@ -1323,16 +1627,16 @@ export class MobManager {
     if (hasBoss) return;
 
     const type = BOSS_TYPES[Math.floor(Math.random() * BOSS_TYPES.length)];
-    const angle = Math.random() * Math.PI * 2;
-    const dist = 30 + Math.random() * 20;
-    const sx = playerPos.x + Math.cos(angle) * dist;
-    const sz = playerPos.z + Math.sin(angle) * dist;
-    const sy = this._findGround(sx, sz);
-    if (sy < 0) return;
-
-    const mob = new Mob(type, MOB_CATEGORY.MONSTER, new THREE.Vector3(sx, sy, sz), this.world);
-    this.mobs.push(mob);
-    this.scene.add(mob.mesh);
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = 30 + Math.random() * 17;
+      const x = Math.floor(playerPos.x + Math.cos(angle) * distance) + 0.5;
+      const z = Math.floor(playerPos.z + Math.sin(angle) * distance) + 0.5;
+      const y = this._findGround(x, z, type, true);
+      if (y < 0 || Math.abs(y - playerPos.y) > 16 || this._nearMob(x, y, z, 4)) continue;
+      this._addMob(type, MOB_CATEGORY.MONSTER, x, y, z);
+      return;
+    }
   }
 
   dispose() {
@@ -1340,27 +1644,26 @@ export class MobManager {
       mob.dispose(this.scene);
     }
     this.mobs = [];
+    for (const projectile of this.projectiles) this.scene.remove(projectile.mesh);
+    this.projectiles = [];
+    this._npcSpawnedChunks.clear();
   }
 
   // Spawn a Villager NPC at a world position (called by game for village chunks)
   spawnNPC(wx, wz) {
-    const chunkKey = `${Math.floor(wx / 16)},${Math.floor(wz / 16)}`;
+    const chunkKey = `${Math.floor(wx / CHUNK_SIZE)},${Math.floor(wz / CHUNK_SIZE)}`;
     if (this._npcSpawnedChunks.has(chunkKey)) return;
     this._npcSpawnedChunks.add(chunkKey);
 
-    const sy = this._findGround(wx, wz);
-    if (sy < 0) return;
-
-    const mob = new Mob(NPC_TYPE, MOB_CATEGORY.ANIMAL, new THREE.Vector3(wx, sy, wz), this.world);
-    mob.isNPC = true;
-    // Give the NPC a simple robe color
-    mob.mesh.traverse(child => {
-      if (child.isMesh && child.material) {
-        child.material = child.material.clone();
-        child.material.color.setHex(0x8a6a4a);
-      }
-    });
-    this.mobs.push(mob);
-    this.scene.add(mob.mesh);
+    const x = Math.floor(wx) + 0.5;
+    const z = Math.floor(wz) + 0.5;
+    const y = this._findGround(x, z, NPC_TYPE);
+    if (y < 0) {
+      this._npcSpawnedChunks.delete(chunkKey);
+      return;
+    }
+    const villager = this._addMob(NPC_TYPE, MOB_CATEGORY.ANIMAL, x, y, z);
+    villager.isNPC = true;
+    villager.npcChunkKey = chunkKey;
   }
 }

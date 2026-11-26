@@ -8,10 +8,10 @@ import {
   CHUNK_SIZE, CHUNK_HEIGHT,
   BlockType, BlockData,
 } from './blocks.js';
+import { WATER_LAYER } from './environment-graphics.js';
 import { WorldGenerator } from './worldgen.js';
 
-// Reusable temp color for mesh building
-const _tmpColor = new THREE.Color();
+const _surfacePoint = new THREE.Vector3();
 
 // Face directions: [dx, dy, dz], corners (relative), and base UV mapping for each corner
 const FACES = [
@@ -116,7 +116,7 @@ export class Chunk {
     // Water gets a separate transparent mesh
     const waterPositions = [];
     const waterNormals = [];
-    const waterColors = [];
+    const surfaceBounds = new Map();
     const waterUvs = [];
     const waterIndices = [];
 
@@ -151,24 +151,8 @@ export class Chunk {
 
             if (!shouldRender) continue;
 
-            // Choose face color based on direction
-            if (face.dir[1] === 1 && bd.topColor !== undefined) {
-              _tmpColor.set(bd.topColor);
-            } else if (face.dir[1] === -1 && bd.bottomColor !== undefined) {
-              _tmpColor.set(bd.bottomColor);
-            } else if (face.dir[1] === 0 && bd.sideColor !== undefined) {
-              _tmpColor.set(bd.sideColor);
-            } else {
-              _tmpColor.set(bd.color);
-            }
-
-            // Simple ambient occlusion: darken based on face direction
-            const ao = face.dir[1] === 1 ? 1.0 : face.dir[1] === -1 ? 0.6 : 0.8;
-            _tmpColor.multiplyScalar(ao);
-
             const pArr = isWater ? waterPositions : positions;
             const nArr = isWater ? waterNormals : normals;
-            const cArr = isWater ? waterColors : colors;
             const uArr = isWater ? waterUvs : uvs;
             const iArr = isWater ? waterIndices : indices;
             const vc = isWater ? waterVertCount : vertCount;
@@ -236,6 +220,23 @@ export class Chunk {
               }
 
               pArr.push(wx + cx, ly + cy, wz + cz);
+              if (isWater && face.dir[1] === 1) {
+                const height = ly + cy;
+                if (!surfaceBounds.has(height)) surfaceBounds.set(height, new THREE.Box3());
+                const bounds = surfaceBounds.get(height);
+                bounds.min.min(_surfacePoint.set(wx + cx, height, wz + cz));
+                bounds.max.max(_surfacePoint);
+              } else if (!isWater) {
+                const [dx, dy, dz] = face.dir;
+                const vx = corner[0] * 2 - 1;
+                const vy = corner[1] * 2 - 1;
+                const vz = corner[2] * 2 - 1;
+                const sideA = this._occludes(nx + (dx === 0 ? vx : 0), ny + (dx !== 0 ? vy : 0), nz);
+                const sideB = this._occludes(nx, ny + (dz !== 0 ? vy : 0), nz + (dz === 0 ? vz : 0));
+                const diagonal = this._occludes(nx + (dx === 0 ? vx : 0), ny + (dy === 0 ? vy : 0), nz + (dz === 0 ? vz : 0));
+                const shade = 1 - 0.14 * (sideA && sideB ? 3 : sideA + sideB + diagonal);
+                colors.push(shade, shade, shade);
+              }
               nArr.push(face.dir[0], face.dir[1], face.dir[2]);
 
               const finalU = uOffset + baseUv[0] * (1 / 16);
@@ -262,10 +263,14 @@ export class Chunk {
       geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
       geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
       geom.setIndex(indices);
+      geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
-      let mat = materials ? materials.solid : new THREE.MeshLambertMaterial();
+      let mat = materials ? materials.solid : new THREE.MeshLambertMaterial({ vertexColors: true });
       this.mesh = new THREE.Mesh(geom, mat);
+      this.mesh.castShadow = true;
+      this.mesh.receiveShadow = true;
       this.mesh.userData.isChunk = true;
+      this.mesh.userData.ownsMaterial = !materials;
       scene.add(this.mesh);
     }
 
@@ -284,23 +289,31 @@ export class Chunk {
       });
       this.waterMesh = new THREE.Mesh(geom, mat);
       this.waterMesh.userData.isChunk = true;
+      this.waterMesh.userData.ownsMaterial = !materials;
+      this.waterMesh.userData.surfaceBounds = [...surfaceBounds.values()];
+      if (materials) this.waterMesh.layers.set(WATER_LAYER);
       scene.add(this.waterMesh);
     }
 
     this.dirty = false;
   }
 
+  _occludes(x, y, z) {
+    const block = BlockData[this.getBlock(x, y, z)];
+    return Number(Boolean(block?.solid && !block.transparent && !block.thin));
+  }
+
   _removeMeshes(scene) {
     if (this.mesh) {
       scene.remove(this.mesh);
       this.mesh.geometry.dispose();
-      this.mesh.material.dispose();
+      if (this.mesh.userData.ownsMaterial) this.mesh.material.dispose();
       this.mesh = null;
     }
     if (this.waterMesh) {
       scene.remove(this.waterMesh);
       this.waterMesh.geometry.dispose();
-      this.waterMesh.material.dispose();
+      if (this.waterMesh.userData.ownsMaterial) this.waterMesh.material.dispose();
       this.waterMesh = null;
     }
   }

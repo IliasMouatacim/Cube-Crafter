@@ -53,15 +53,15 @@ export class TouchControls {
       </div>
       <div id="touch-look-zone"></div>
       <div id="touch-buttons">
-        <button id="touch-jump" class="touch-btn">⬆</button>
-        <button id="touch-attack" class="touch-btn touch-btn-attack">⛏</button>
-        <button id="touch-place" class="touch-btn touch-btn-place">◼</button>
-        <button id="touch-inventory" class="touch-btn touch-btn-small">☰</button>
-        <button id="touch-sprint" class="touch-btn touch-btn-small touch-btn-sprint">🏃</button>
+        <button id="touch-jump" aria-label="Jump" class="touch-btn">⬆</button>
+        <button id="touch-attack" aria-label="Mine or attack" class="touch-btn touch-btn-attack">⛏</button>
+        <button id="touch-place" aria-label="Place or interact" class="touch-btn touch-btn-place">◼</button>
+        <button id="touch-inventory" aria-label="Inventory" class="touch-btn touch-btn-small">☰</button>
+        <button id="touch-sprint" aria-label="Toggle sprint" class="touch-btn touch-btn-small touch-btn-sprint">🏃</button>
       </div>
       <div id="touch-hotbar-arrows">
-        <button id="touch-hotbar-left" class="touch-btn touch-btn-tiny">◀</button>
-        <button id="touch-hotbar-right" class="touch-btn touch-btn-tiny">▶</button>
+        <button id="touch-hotbar-left" aria-label="Previous hotbar slot" class="touch-btn touch-btn-tiny">◀</button>
+        <button id="touch-hotbar-right" aria-label="Next hotbar slot" class="touch-btn touch-btn-tiny">▶</button>
       </div>
     `;
     document.getElementById('app').appendChild(container);
@@ -73,9 +73,6 @@ export class TouchControls {
   }
 
   _bindEvents() {
-    // Prevent default touch behaviors (scroll, zoom)
-    document.addEventListener('touchstart', (e) => { e.preventDefault(); }, { passive: false });
-
     // Joystick zone
     this._joystickZone.addEventListener('touchstart', (e) => this._onJoystickStart(e), { passive: false });
     this._joystickZone.addEventListener('touchmove', (e) => this._onJoystickMove(e), { passive: false });
@@ -190,23 +187,16 @@ export class TouchControls {
   applyToPlayer(player) {
     if (!this.isMobile) return;
 
-    const kb = player.keyBindings;
-
-    // Movement via joystick → set virtual key states
     const deadzone = 0.2;
-    player.keys[kb.forward] = this.moveY < -deadzone;
-    player.keys[kb.back] = this.moveY > deadzone;
-    player.keys[kb.left] = this.moveX < -deadzone;
-    player.keys[kb.right] = this.moveX > deadzone;
-
-    // Sprint
-    player.keys[kb.sprint] = this.sprintActive;
-
-    // Jump
-    player.keys[kb.jump] = this.jumpPressed;
+    player.keys._touch_forward = this.moveY < -deadzone;
+    player.keys._touch_back = this.moveY > deadzone;
+    player.keys._touch_left = this.moveX < -deadzone;
+    player.keys._touch_right = this.moveX > deadzone;
+    player.keys._touch_sprint = this.sprintActive;
+    player.keys._touch_jump = this.jumpPressed;
 
     // Look (apply accumulated delta then reset)
-    const sensitivity = 0.004;
+    const sensitivity = 0.004 * player.lookSensitivity;
     player.yaw -= this.lookDeltaX * sensitivity;
     player.pitch -= this.lookDeltaY * sensitivity;
     player.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, player.pitch));

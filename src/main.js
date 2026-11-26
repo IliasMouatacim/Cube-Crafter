@@ -16,6 +16,8 @@ import { SoundFX, BGM } from './sound.js';
 import { ParticleSystem } from './particles.js';
 import { TouchControls } from './touch.js';
 import { Network } from './network.js';
+import { EnvironmentGraphics, WATER_LAYER } from './environment-graphics.js';
+import { PlaySettings } from './play-settings.js';
 
 // Reusable temp vector for main loop
 const _tmpDir = new THREE.Vector3();
@@ -49,10 +51,16 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 200);
     this.camera2 = new THREE.PerspectiveCamera(70, (window.innerWidth / 2) / window.innerHeight, 0.1, 200);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: false });
+    this.camera.layers.enable(WATER_LAYER);
+    this.camera2.layers.enable(WATER_LAYER);
+    this.renderer = new THREE.WebGLRenderer({ antialias: !window.matchMedia('(pointer: coarse)').matches });
+    this.renderer.domElement.tabIndex = -1;
+    this.renderer.domElement.setAttribute('aria-label', 'VoxelCraft game view');
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setScissorTest(false);
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
     document.body.insertBefore(this.renderer.domElement, document.body.firstChild);
 
     // Lighting
@@ -61,10 +69,18 @@ class Game {
 
     const sunLight = new THREE.DirectionalLight(0xFFFFDD, 1.0);
     sunLight.position.set(100, 200, 100);
-    this.scene.add(sunLight);
+    this.scene.add(sunLight, sunLight.target);
+    Object.assign(sunLight.shadow.camera, {
+      left: -30, right: 30, top: 30, bottom: -30, near: 2, far: 230,
+    });
+    sunLight.shadow.camera.updateProjectionMatrix();
+    sunLight.shadow.mapSize.set(1024, 1024);
+    sunLight.shadow.bias = -0.00015;
+    sunLight.shadow.normalBias = 0.032;
 
     const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0x556B2F, 0.4);
     this.scene.add(hemiLight);
+    this.graphics = new EnvironmentGraphics(this.scene, sunLight);
 
     // World seed
     this.seed = Math.floor(Math.random() * 100000);
@@ -80,17 +96,8 @@ class Game {
     else if (THREE.sRGBEncoding) atlasTexture.encoding = THREE.sRGBEncoding;
 
     this.materials = {
-      solid: new THREE.MeshLambertMaterial({
-        map: atlasTexture,
-        color: 0xffffff,
-      }),
-      water: new THREE.MeshLambertMaterial({
-        map: atlasTexture,
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0.6,
-        side: THREE.DoubleSide,
-      })
+      solid: new THREE.MeshLambertMaterial({ map: atlasTexture, vertexColors: true }),
+      water: this.graphics.water,
     };
 
     // Core systems
@@ -171,6 +178,25 @@ class Game {
     this._tradeScreen = document.getElementById('trade-screen');
     this._tradeList = document.getElementById('trade-list');
 
+    this.creatureCue = document.getElementById('creature-cue');
+    this.creatureCue2 = document.getElementById('p2-creature-cue');
+    this.cueTimer = 0;
+    this.settings = new PlaySettings(values => {
+      this._applyPlayerSettings(this.player, values);
+      if (this.player2) this._applyPlayerSettings(this.player2, values);
+      this.dayNight.highContrast = values.highContrast;
+    }, open => {
+      if (open) {
+        this.player.keys = {};
+        if (this.player2) this.player2.keys = {};
+        this._stopMining();
+        this.placing = false;
+        if (document.pointerLockElement) document.exitPointerLock();
+      } else {
+        this.lastTime = performance.now();
+        if (this.running) this.renderer.domElement.focus({ preventScroll: true });
+      }
+    });
     this._setupEvents();
 
     // Start screen buttons
@@ -193,9 +219,15 @@ class Game {
     }, 10000);
   }
 
+  _applyPlayerSettings(player, values) {
+    player.lookSensitivity = values.sensitivity;
+    player.characterModel.reducedMotion = values.reducedMotion;
+  }
+
   _initPlayer2() {
     this.inventory2 = new Inventory(36);
     this.player2 = new Player(this.camera2, this.world, P2_KEYS, 1);
+    this._applyPlayerSettings(this.player2, this.settings.values);
     this.ui2 = new UI(this.inventory2, 'p2');
     this.scene.add(this.player2.highlightMesh);
     this.player2.characterModel.addToScene(this.scene);
@@ -228,7 +260,7 @@ class Game {
 
     // Mouse buttons: Break (left) and place (right) — desktop only
     document.addEventListener('mousedown', (e) => {
-      if (!this.running || this.touch.isMobile) return;
+      if (!this.running || this.touch.isMobile || this.settings.dialog.open || e.target.closest('[data-open-settings]')) return;
 
       // Close trade screen on click outside
       if (this.tradeOpen) return;
@@ -239,41 +271,16 @@ class Game {
 
       // Re-lock pointer if lost (e.g. tabbed out and came back)
       if (!p.mouseLocked && !ui.inventoryOpen) {
-        this.renderer.domElement.requestPointerLock();
+        this._requestPointerLock();
         return;
       }
 
       if (!p.mouseLocked) return;
 
       if (e.button === 0) {
-        // Trigger punch animation
-        p.characterModel.triggerPunch();
-        SoundFX.hit();
-        // Use camera position for attack origin
-        const attackOrigin = p.camera.position.clone();
-        _tmpDir.set(0, 0, -1).applyQuaternion(p.camera.quaternion);
-
-        // Check if holding bow — shoot arrow
-        const heldSlot = inv.getHeldSlot();
-        if (heldSlot && !heldSlot.isBlock && ItemData[heldSlot.id] && ItemData[heldSlot.id].toolType === ToolType.BOW) {
-          this._shootBow(p, inv, ui);
-          return;
-        }
-
-        // Use weapon damage from held item
-        const damage = getAttackDamage(heldSlot);
-        const hitMob = this.mobs.playerAttack(p.position, attackOrigin, _tmpDir, damage);
-        if (hitMob) {
-          // Damage weapon on hit
-          inv.damageHeldTool();
-        } else {
-          // Start progressive mining
-          this.breaking = true;
-        }
+        this._beginAttack('mouse');
       } else if (e.button === 2) {
-        this._handleRightClick(p, inv, ui);
-        this.placing = true;
-        this._placeCooldown = 0.25; // initial place already happened
+        this._beginPlace();
       }
     });
 
@@ -282,10 +289,7 @@ class Game {
     // Stop progressive mining on mouse release
     document.addEventListener('mouseup', (e) => {
       if (e.button === 0) {
-        this.breaking = false;
-        this.breakProgress = 0;
-        this.breakTarget = null;
-        if (this._breakProgressEl) this._breakProgressEl.style.display = 'none';
+        this._stopMining('mouse');
       }
       if (e.button === 2) {
         this.placing = false;
@@ -294,7 +298,15 @@ class Game {
 
     // Keyboard
     document.addEventListener('keydown', (e) => {
-      if (!this.running) return;
+      if (!this.running || this.settings.dialog.open || e.target.closest('input, button, textarea, select')) return;
+
+      if (e.code === 'KeyZ' || e.code === 'KeyX') {
+        if (!e.repeat && !this.ui.inventoryOpen && !this.ui.furnaceOpen && !this.tradeOpen) {
+          if (e.code === 'KeyZ') this._beginAttack('keyboard');
+          else this._beginPlace();
+        }
+        return;
+      }
 
       const p = this.player;
       const inv = this.inventory;
@@ -332,7 +344,7 @@ class Game {
           document.exitPointerLock();
           p.mouseLocked = false;
         } else {
-          this.renderer.domElement.requestPointerLock();
+          this._requestPointerLock();
         }
       }
 
@@ -371,7 +383,7 @@ class Game {
       // F = close furnace if open
       if (e.code === 'KeyF' && ui.furnaceOpen) {
         ui.toggleFurnace();
-        this.renderer.domElement.requestPointerLock();
+        this._requestPointerLock();
       }
 
       // T = close trade screen if open, or interact with NPC
@@ -384,11 +396,16 @@ class Game {
       }
     });
 
+    document.addEventListener('keyup', event => {
+      if (event.code === 'KeyZ') this._stopMining('keyboard');
+      if (event.code === 'KeyX') this.placing = false;
+    });
+
     // Scroll wheel for hotbar
     document.addEventListener('wheel', (e) => {
       const inv = (this.coopMode && this.inventory2) ? this.inventory2 : this.inventory;
       const ui = (this.coopMode && this.ui2) ? this.ui2 : this.ui;
-      if (!this.running || ui.inventoryOpen) return;
+      if (!this.running || ui.inventoryOpen || this.settings.dialog.open) return;
       const dir = e.deltaY > 0 ? 1 : -1;
       let newSlot = inv.selectedSlot + dir;
       if (newSlot < 0) newSlot = inv.hotbarSize - 1;
@@ -531,7 +548,7 @@ class Game {
       const isOpen = ui.toggleFurnace();
       if (player === this.player) {
         if (isOpen) { document.exitPointerLock(); player.mouseLocked = false; }
-        else this.renderer.domElement.requestPointerLock();
+        else this._requestPointerLock();
       }
       return;
     }
@@ -540,7 +557,7 @@ class Game {
       const isOpen = ui.toggleInventory(true);
       if (player === this.player) {
         if (isOpen) { document.exitPointerLock(); player.mouseLocked = false; }
-        else this.renderer.domElement.requestPointerLock();
+        else this._requestPointerLock();
       }
       return;
     }
@@ -570,14 +587,14 @@ class Game {
            _pendingExplosion: null,
            mesh: mesh,
            category: 99,
-           update: function(dt) {
+           update: function(dt, playerPos, isNight, reducedMotion) {
              this.fuseTimer += dt;
              this.velocity.y -= 24 * dt;
              this.position.addScaledVector(this.velocity, dt);
              if (this.position.y < bp.y + 0.5) { this.position.y = bp.y + 0.5; this.velocity.y = 0; }
              this.mesh.position.copy(this.position);
              
-             if (Math.floor(this.fuseTimer * 4) % 2 === 0) {
+             if (!reducedMotion && Math.floor(this.fuseTimer * 4) % 2 === 0) {
                 this.mesh.material.color.setHex(0xffffff);
              } else {
                 this.mesh.material.color.setHex(0xff4444);
@@ -590,7 +607,11 @@ class Game {
              }
              return true;
            },
-           dispose: function(scene) { scene.remove(this.mesh); }
+           dispose: function(scene) {
+             scene.remove(this.mesh);
+             this.mesh.geometry.dispose();
+             this.mesh.material.dispose();
+           }
         };
         this.mobs.mobs.push(tntMob);
         SoundFX.blockBreak();
@@ -753,7 +774,7 @@ class Game {
       // Hit mob
       let hitMob = false;
       for (const mob of this.mobs.mobs) {
-        if (!mob.alive) continue;
+        if (!mob.alive || mob.isTNT) continue;
         const dist = a.position.distanceTo(mob.position);
         if (dist < 1.2) {
           const kb = _tmpDir.copy(a.velocity).normalize();
@@ -817,7 +838,7 @@ class Game {
     const isOpen = ui.toggleChest(chestKey, chestData);
     if (inventory === this.inventory) { // P1 only
       if (isOpen) { document.exitPointerLock(); this.player.mouseLocked = false; }
-      else this.renderer.domElement.requestPointerLock();
+      else this._requestPointerLock();
     }
   }
 
@@ -834,7 +855,7 @@ class Game {
   _closeTrade() {
     this.tradeOpen = false;
     this._tradeScreen.classList.add('hidden');
-    this.renderer.domElement.requestPointerLock();
+    this._requestPointerLock();
   }
 
   _buildTradeUI() {
@@ -1202,6 +1223,8 @@ class Game {
         this.seed = seed;
         this.world.dispose();
         this.world = new World(this.scene, this.seed, this.materials);
+        this.mobs.dispose();
+        this.mobs.world = this.world;
         this.player.world = this.world;
       }
       this.start(false, true);
@@ -1214,11 +1237,14 @@ class Game {
     this.coopMode = coop;
     this.multiplayerMode = !!multiplayer;
     document.getElementById('start-screen').style.display = 'none';
+    document.getElementById('in-game-settings').hidden = false;
+    document.body.classList.add('playing');
+    this.renderer.domElement.focus({ preventScroll: true });
     this.running = true;
 
     // Lock pointer for P1 (skip on mobile — uses touch controls)
     if (!this.touch.isMobile) {
-      this.renderer.domElement.requestPointerLock();
+      this._requestPointerLock();
     }
 
     // Init and play background music
@@ -1293,6 +1319,11 @@ class Game {
     const dt = Math.min((now - this.lastTime) / 1000, 0.1);
     this.lastTime = now;
 
+    if (this.settings.dialog.open) {
+      if (this.multiplayerMode) this.network.update(dt, this.player);
+      return;
+    }
+
     // FPS counter
     this.frameCount++;
     this.fpsTime += dt;
@@ -1356,10 +1387,20 @@ class Game {
     this.dayNight.update(dt);
 
     // Mobs (use P1 position for spawning/AI)
-    this.mobs.update(dt, this.player.position, this.dayNight.isNight, this.camera);
+    const { peaceful, reducedMotion, creatureCues } = this.settings.values;
+    this.mobs.update(dt, this.player.position, this.dayNight.isNight, this.camera, {
+      peaceful, reducedMotion, playerMoving: this.player.sprinting && this.player._lastMoving,
+      secondPlayer: this.coopMode ? this.player2.position : null,
+    });
+    this.cueTimer -= dt;
+    if (this.cueTimer <= 0) {
+      this.cueTimer = 0.22;
+      this._updateCreatureCue(this.creatureCue, this.player, creatureCues && !this.ui.inventoryOpen && !this.tradeOpen);
+      if (this.coopMode) this._updateCreatureCue(this.creatureCue2, this.player2, creatureCues && !this.ui2.inventoryOpen);
+    }
 
     // Update projectiles
-    this.mobs.updateProjectiles(dt, this.player.position);
+    this.mobs.updateProjectiles(dt, this.player.position, this.coopMode ? this.player2.position : null);
 
     // Mob damage to P1
     const mobDamage = this.mobs.getPlayerDamage();
@@ -1402,9 +1443,9 @@ class Game {
       this.ui.updateFurnaceUI();
     }
 
-    // Mob damage to P2 (check proximity to P2)
-    if (this.coopMode && this.player2) {
-      this._applyMobDamageToP2();
+    if (this.coopMode && this.player2 && !this.player2.creativeMode) {
+      const damage = this.mobs.getPlayerDamage(1) + this.mobs.getExplosionDamage(1) + this.mobs.getArrowDamage(1);
+      if (damage > 0) this.player2.takeDamage(damage);
     }
 
     // World chunks - load around all players in a single pass
@@ -1469,6 +1510,8 @@ class Game {
     }
 
     // Render
+    this.graphics.update(dt, this.dayNight, this.camera, reducedMotion);
+    this.graphics.updateShadows(this.renderer, this.player.position, this.settings.values.shadows);
     if (this.coopMode) {
       const w = window.innerWidth;
       const h = window.innerHeight;
@@ -1480,7 +1523,7 @@ class Game {
       if (this.player2) this.player2.characterModel.setFirstPerson(false);
       this.renderer.setViewport(0, 0, hw, h);
       this.renderer.setScissor(0, 0, hw, h);
-      this.renderer.render(this.scene, this.camera);
+      this._renderView(this.camera);
 
       // Right viewport: Player 2's view
       // Only hide P2's head if P2 is in first-person mode
@@ -1488,21 +1531,21 @@ class Game {
       if (this.player2) this.player2.characterModel.setFirstPerson(!this.player2.thirdPerson);
       this.renderer.setViewport(hw, 0, w - hw, h);
       this.renderer.setScissor(hw, 0, w - hw, h);
-      this.renderer.render(this.scene, this.camera2);
+      this._renderView(this.camera2);
     } else {
       // Solo: In 3rd person show full character (head visible).
       // In 1st person (V key) hide head to avoid it blocking the camera.
       // Always explicitly set to avoid stale state from previous frames.
       const hideHead = !this.player.thirdPerson;
       this.player.characterModel.setFirstPerson(hideHead);
-      this.renderer.render(this.scene, this.camera);
+      this._renderView(this.camera);
     }
   }
 
   _handleGamepadActions(player, inventory, ui) {
     // Attack (X button)
     if (player.gpPressed('_gp_attack')) {
-      player.characterModel.triggerPunch();
+      if (!this.settings.values.reducedMotion) player.characterModel.triggerPunch();
       SoundFX.hit();
       const attackOrigin = player.camera.position.clone();
       _tmpDir.set(0, 0, -1).applyQuaternion(player.camera.quaternion);
@@ -1541,7 +1584,7 @@ class Game {
           document.exitPointerLock();
           player.mouseLocked = false;
         } else {
-          this.renderer.domElement.requestPointerLock();
+          this._requestPointerLock();
         }
       }
     }
@@ -1575,16 +1618,18 @@ class Game {
     }
   }
 
-  _applyMobDamageToP2() {
-    // Check each mob for proximity to P2 and deal damage
-    for (const mob of this.mobs.mobs) {
-      if (!mob.alive || mob.category !== 0) continue; // 0 = MONSTER
-      _tmpDir.subVectors(this.player2.position, mob.position);
-      if (_tmpDir.length() < 1.5 && mob.attackCooldown <= 0) {
-        this.player2.takeDamage(mob.type.damage);
-        mob.attackCooldown = 1.0;
-      }
-    }
+  _renderView(camera) {
+    this.graphics.prepareView(this.renderer, this.scene, this.world, camera, this.settings.values.reflections);
+    this.renderer.render(this.scene, camera);
+  }
+
+  _updateCreatureCue(element, player, enabled) {
+    const { camera } = player;
+    const cue = enabled
+      ? this.mobs.describeNearby(player.position, camera.position, camera.getWorldDirection(_tmpDir))
+      : '';
+    if (element.textContent !== cue) element.textContent = cue;
+    element.hidden = !cue;
   }
 
   _spawnDroppedItem(drop, position, velocity) {
@@ -1665,38 +1710,49 @@ class Game {
     }
   }
 
+  _requestPointerLock() {
+    if (this.touch.isMobile) return;
+    // Keyboard aiming remains available when the browser denies pointer lock.
+    this.renderer.domElement.requestPointerLock?.()?.catch(() => {});
+  }
+
+  _beginAttack(source) {
+    const { player, inventory, ui } = this;
+    if (!this.settings.values.reducedMotion) player.characterModel.triggerPunch();
+    SoundFX.hit();
+    const held = inventory.getHeldSlot();
+    if (held && !held.isBlock && ItemData[held.id]?.toolType === ToolType.BOW) {
+      this._shootBow(player, inventory, ui);
+      return;
+    }
+    const heading = player.camera.getWorldDirection(_tmpDir);
+    if (this.mobs.playerAttack(player.position, player.camera.position, heading, getAttackDamage(held))) {
+      inventory.damageHeldTool();
+    } else {
+      this.breaking = true;
+      this.miningInput = source;
+    }
+  }
+
+  _beginPlace() {
+    this._handleRightClick(this.player, this.inventory, this.ui);
+    this.placing = true;
+    this._placeCooldown = 0.25;
+  }
+
+  _stopMining(source) {
+    if (source && this.miningInput !== source) return;
+    this.miningInput = null;
+    this.breaking = false;
+    this.breakProgress = 0;
+    this.breakTarget = null;
+    if (this._breakProgressEl) this._breakProgressEl.style.display = 'none';
+  }
+
   _handleTouchActions(dt) {
     const touch = this.touch;
-
-    // Attack / mine
-    if (touch.consumeAttack()) {
-      this.player.characterModel.triggerPunch();
-      SoundFX.hit();
-      const attackOrigin = this.player.camera.position.clone();
-      _tmpDir.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
-
-      const heldSlot = this.inventory.getHeldSlot();
-      if (heldSlot && !heldSlot.isBlock && ItemData[heldSlot.id] && ItemData[heldSlot.id].toolType === ToolType.BOW) {
-        this._shootBow(this.player, this.inventory, this.ui);
-      } else {
-        const damage = getAttackDamage(heldSlot);
-        const hitMob = this.mobs.playerAttack(this.player.position, attackOrigin, _tmpDir, damage);
-        if (hitMob) {
-          this.inventory.damageHeldTool();
-        } else {
-          // Start progressive mining via touch hold
-          this.breaking = true;
-        }
-      }
-    }
-
-    // Stop mining when attack button released
-    if (!touch.attackHeld && this.breaking) {
-      this.breaking = false;
-      this.breakProgress = 0;
-      this.breakTarget = null;
-      if (this._breakProgressEl) this._breakProgressEl.style.display = 'none';
-    }
+    if (touch.consumeAttack()) this._beginAttack('touch');
+    if (!touch.attackHeld) this._stopMining('touch');
 
     // Place / interact
     if (touch.consumePlace()) {
