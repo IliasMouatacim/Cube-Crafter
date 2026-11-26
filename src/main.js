@@ -5,6 +5,7 @@
 
 import * as THREE from 'three';
 import { World } from './world.js';
+import { WorldGenerator } from './worldgen.js';
 import { Player, P1_KEYS, P2_KEYS } from './player.js';
 import { Inventory } from './inventory.js';
 import { UI } from './ui.js';
@@ -42,6 +43,10 @@ class Game {
     this.frameCount = 0;
     this.fpsTime = 0;
     this.fps = 0;
+    this.hudTimer = 0;
+    this.fluidTimer = 0;
+    this.renderScale = 1;
+    this.fastWindows = 0;
 
     // Three.js setup
     this.scene = new THREE.Scene();
@@ -53,11 +58,16 @@ class Game {
 
     this.camera.layers.enable(WATER_LAYER);
     this.camera2.layers.enable(WATER_LAYER);
-    this.renderer = new THREE.WebGLRenderer({ antialias: !window.matchMedia('(pointer: coarse)').matches });
+    const touchDisplay = window.matchMedia('(pointer: coarse)').matches;
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: !touchDisplay,
+      powerPreference: touchDisplay ? 'default' : 'high-performance',
+    });
     this.renderer.domElement.tabIndex = -1;
     this.renderer.domElement.setAttribute('aria-label', 'VoxelCraft game view');
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.maxPixelRatio = Math.min(window.devicePixelRatio, 1.5);
+    this.renderer.setPixelRatio(this.maxPixelRatio);
     this.renderer.setScissorTest(false);
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.shadowMap.autoUpdate = false;
@@ -115,7 +125,7 @@ class Game {
     this.network.setSeed(this.seed);
     this.network.onRemoteBlock = (x, y, z, blockType) => {
       this.world.setBlock(x, y, z, blockType);
-      const bd = BlockData[blockType];
+      this.world.saveModification(x, y, z, blockType);
       if (blockType === BlockType.AIR) {
         SoundFX.blockBreak();
       } else {
@@ -185,6 +195,11 @@ class Game {
       this._applyPlayerSettings(this.player, values);
       if (this.player2) this._applyPlayerSettings(this.player2, values);
       this.dayNight.highContrast = values.highContrast;
+      this._applyRenderDistance(Number(values.viewDistance));
+      if (!values.adaptiveResolution) {
+        this.fastWindows = 0;
+        this._setRenderScale(1);
+      }
     }, open => {
       if (open) {
         this.player.keys = {};
@@ -203,6 +218,10 @@ class Game {
     document.getElementById('play-btn').addEventListener('click', () => this.start(false));
     document.getElementById('coop-btn').addEventListener('click', () => this.start(true));
 
+    document.getElementById('controls-btn').addEventListener('click', () => {
+      document.getElementById('controls-guide').showModal();
+    });
+
     // Multiplayer buttons
     document.getElementById('host-btn').addEventListener('click', () => this._hostGame());
     document.getElementById('join-btn').addEventListener('click', () => this._joinGame());
@@ -217,6 +236,33 @@ class Game {
     setInterval(() => {
       if (this.running) this.saveGame();
     }, 10000);
+  }
+
+  _applyRenderDistance(distance = Number(this.settings?.values.viewDistance ?? 4)) {
+    this.world.renderDistance = distance;
+    this.scene.fog.near = distance * CHUNK_SIZE * 0.5;
+    this.scene.fog.far = distance * CHUNK_SIZE;
+  }
+
+  _setRenderScale(scale) {
+    if (this.renderScale === scale) return;
+    this.renderScale = scale;
+    this.renderer.setPixelRatio(this.maxPixelRatio * scale);
+  }
+
+  _adjustResolution() {
+    if (!this.settings.values.adaptiveResolution) return;
+    if (this.fps < 42) {
+      this.fastWindows = 0;
+      this._setRenderScale(Math.max(0.55, this.renderScale - 0.15));
+    } else if (this.fps >= 57) {
+      if (++this.fastWindows >= 5) {
+        this.fastWindows = 0;
+        this._setRenderScale(Math.min(1, this.renderScale + 0.1));
+      }
+    } else {
+      this.fastWindows = 0;
+    }
   }
 
   _applyPlayerSettings(player, values) {
@@ -252,10 +298,21 @@ class Game {
       this.renderer.setSize(w, h);
     });
 
+    window.addEventListener('blur', () => {
+      this.player.keys = {};
+      if (this.player2) this.player2.keys = {};
+      this._stopMining();
+      this.placing = false;
+    });
+
     // Pointer lock (Keyboard player mouse)
     document.addEventListener('pointerlockchange', () => {
       const p = this.player;
       p.mouseLocked = !!document.pointerLockElement;
+      if (!p.mouseLocked) {
+        this._stopMining('mouse');
+        this.placing = false;
+      }
     });
 
     // Mouse buttons: Break (left) and place (right) — desktop only
@@ -712,7 +769,7 @@ class Game {
 
     if (this.world.getBlock(px, py, pz) !== BlockType.AIR) return;
 
-    this.world.setBlock(px, py, pz, placeType);
+    if (!this.world.setBlock(px, py, pz, placeType)) return;
     this.world.saveModification(px, py, pz, placeType);
 
     // Broadcast block place to network
@@ -1223,6 +1280,7 @@ class Game {
         this.seed = seed;
         this.world.dispose();
         this.world = new World(this.scene, this.seed, this.materials);
+        this._applyRenderDistance();
         this.mobs.dispose();
         this.mobs.world = this.world;
         this.player.world = this.world;
@@ -1234,6 +1292,7 @@ class Game {
   }
 
   start(coop, multiplayer) {
+    if (this.running) return;
     this.coopMode = coop;
     this.multiplayerMode = !!multiplayer;
     document.getElementById('start-screen').style.display = 'none';
@@ -1257,6 +1316,8 @@ class Game {
       const spawn = this.world.getSpawnPoint();
       this.player.spawn(spawn);
     }
+
+    this.world.ensureTerrainAt(this.player.position.x, this.player.position.z);
 
     // Camera aspect for split-screen
     if (this.coopMode) {
@@ -1316,7 +1377,8 @@ class Game {
     requestAnimationFrame(() => this._loop());
 
     const now = performance.now();
-    const dt = Math.min((now - this.lastTime) / 1000, 0.1);
+    const frameTime = (now - this.lastTime) / 1000;
+    const dt = Math.min(frameTime, 0.1);
     this.lastTime = now;
 
     if (this.settings.dialog.open) {
@@ -1326,9 +1388,15 @@ class Game {
 
     // FPS counter
     this.frameCount++;
-    this.fpsTime += dt;
+    if (frameTime > 1) {
+      this.frameCount = 0;
+      this.fpsTime = 0;
+    } else {
+      this.fpsTime += frameTime;
+    }
     if (this.fpsTime >= 1.0) {
       this.fps = Math.round(this.frameCount / this.fpsTime);
+      this._adjustResolution();
       this.frameCount = 0;
       this.fpsTime = 0;
     }
@@ -1454,47 +1522,28 @@ class Game {
       : undefined;
     this.world.update(this.player.position.x, this.player.position.z, extraPos);
 
-    // NPC spawning: check nearby village chunks
-    if (this.frameCount === 0) {
-      this._trySpawnVillageNPCs();
+    this.fluidTimer -= dt;
+    if (this.fluidTimer <= 0) {
+      this.fluidTimer = 0.2;
+      this.world.simulateFluids();
     }
 
-    // Update P1 UI
+    if (this.frameCount === 0) this._trySpawnVillageNPCs();
+
     this.ui.updateHealth(this.player.health);
     this.ui.updateHunger(this.player.hunger);
-    this.ui.updateTimeDisplay(this.dayNight);
-    const debugInfo = this.player.getDebugInfo();
-    debugInfo.fps = this.fps;
-    debugInfo.hunger = this.player.hunger;
-    debugInfo.time = this.dayNight.getTimeString();
-    debugInfo.day = this.dayNight.dayCount;
-    debugInfo.period = this.dayNight.isNight ? 'Night' : this.dayNight.isDawn ? 'Dawn' : this.dayNight.isDusk ? 'Dusk' : 'Day';
-    const mobCount = this.mobs.getMobCount();
-    debugInfo.mobs = `${mobCount.monsters}M / ${mobCount.animals}A`;
-    debugInfo.mode = this.player.creativeMode ? 'Creative' : 'Survival';
-    this.ui.updateDebug(debugInfo);
-    this.ui.updateArmorSlots(this.player.armorSlots);
-
-    // Minimap update (every 10 frames to save perf)
-    if (this.frameCount % 10 === 0) {
-      this.ui.updateMinimap(this.player.position, this.world.generator);
-    }
-
-    // Update P2 UI
-    if (this.coopMode && this.player2 && this.ui2) {
+    if (this.player2) {
       this.ui2.updateHealth(this.player2.health);
       this.ui2.updateHunger(this.player2.hunger);
-      const d2 = this.player2.getDebugInfo();
-      d2.fps = this.fps;
-      d2.time = this.dayNight.getTimeString();
-      d2.day = this.dayNight.dayCount;
-      d2.period = debugInfo.period;
-      d2.mobs = debugInfo.mobs;
-      this.ui2.updateDebug(d2);
+    }
+    this.hudTimer -= dt;
+    if (this.hudTimer <= 0) {
+      this.hudTimer = 0.25;
+      this._updateHud();
     }
 
     // Respawn P1
-    if (this.player.health <= 0 && !this.player.creativeMode) {
+    if ((this.player.health <= 0 && !this.player.creativeMode) || this.player.position.y < -16) {
       const spawn = this.world.getSpawnPoint();
       this.player.spawn(spawn);
       this.player.hunger = this.player.maxHunger;
@@ -1502,7 +1551,7 @@ class Game {
     }
 
     // Respawn P2
-    if (this.coopMode && this.player2 && this.player2.health <= 0) {
+    if (this.player2 && (this.player2.health <= 0 || this.player2.position.y < -16)) {
       const spawn = this.world.getSpawnPoint();
       this.player2.spawn({ x: spawn.x + 2, y: spawn.y, z: spawn.z + 2 });
       this.player2.hunger = this.player2.maxHunger;
@@ -1511,7 +1560,7 @@ class Game {
 
     // Render
     this.graphics.update(dt, this.dayNight, this.camera, reducedMotion);
-    this.graphics.updateShadows(this.renderer, this.player.position, this.settings.values.shadows);
+    this.graphics.updateShadows(this.renderer, this.player.position, this.settings.values.shadows && this.renderScale > 0.6);
     if (this.coopMode) {
       const w = window.innerWidth;
       const h = window.innerHeight;
@@ -1540,6 +1589,31 @@ class Game {
       this.player.characterModel.setFirstPerson(hideHead);
       this._renderView(this.camera);
     }
+  }
+
+  _updateHud() {
+    this.ui.updateTimeDisplay(this.dayNight);
+    this.ui.updateArmorSlots(this.player.armorSlots);
+    if (!this.coopMode) this.ui.updateMinimap(this.player.position, this.world.generator);
+    this.ui2?.updateTimeDisplay(this.dayNight);
+    if (!this.ui.debugVisible && !this.ui2?.debugVisible) return;
+    const cycle = this.dayNight;
+    const counts = this.mobs.getMobCount();
+    const updateDebug = (ui, player) => {
+      if (!ui?.debugVisible) return;
+      ui.updateDebug({
+        ...player.getDebugInfo(),
+        fps: this.fps,
+        hunger: player.hunger,
+        time: cycle.getTimeString(),
+        day: cycle.dayCount,
+        period: cycle.isNight ? 'Night' : cycle.isDawn ? 'Dawn' : cycle.isDusk ? 'Dusk' : 'Day',
+        mobs: `${counts.monsters}M / ${counts.animals}A`,
+        mode: player.creativeMode ? 'Creative' : 'Survival',
+      });
+    };
+    updateDebug(this.ui, this.player);
+    updateDebug(this.ui2, this.player2);
   }
 
   _handleGamepadActions(player, inventory, ui) {
@@ -1619,7 +1693,7 @@ class Game {
   }
 
   _renderView(camera) {
-    this.graphics.prepareView(this.renderer, this.scene, this.world, camera, this.settings.values.reflections);
+    this.graphics.prepareView(this.renderer, this.scene, this.world, camera, this.settings.values.reflections && this.renderScale > 0.7);
     this.renderer.render(this.scene, camera);
   }
 
@@ -1660,12 +1734,16 @@ class Game {
       const item = this.droppedItems[i];
       item.life -= dt;
       if (item.life <= 0) {
-        this.scene.remove(item.mesh);
-        this.droppedItems.splice(i, 1);
+        this._removeDroppedItem(i);
         continue;
       }
       
-      // Physics
+      const chunk = this.world.getChunk(Math.floor(item.position.x / CHUNK_SIZE), Math.floor(item.position.z / CHUNK_SIZE));
+      if (!chunk?.generated) {
+        item.mesh.visible = false;
+        continue;
+      }
+      item.mesh.visible = true;
       item.velocity.y -= 15 * dt;
       item.position.x += item.velocity.x * dt;
       item.position.y += item.velocity.y * dt;
@@ -1694,20 +1772,23 @@ class Game {
       if (pickedUpBy) {
         const inventory = pickedUpBy === 1 ? this.inventory : this.inventory2;
         const ui = pickedUpBy === 1 ? this.ui : this.ui2;
-        
-        if (item.drop.isBlock) {
-          inventory.addBlock(item.drop.id, item.drop.count);
-        } else {
-          inventory.addItem(item.drop.id, item.drop.count);
-        }
-        
+        const { id, count, isBlock } = item.drop;
+        const remaining = isBlock ? inventory.addBlock(id, count) : inventory.addItem(id, count);
+        if (remaining === count) continue;
+        item.drop.count = remaining;
         SoundFX.pickup();
         ui.updateHotbar();
-        
-        this.scene.remove(item.mesh);
-        this.droppedItems.splice(i, 1);
+        if (remaining === 0) this._removeDroppedItem(i);
       }
     }
+  }
+
+  _removeDroppedItem(index) {
+    const { mesh } = this.droppedItems[index];
+    this.scene.remove(mesh);
+    mesh.geometry.dispose();
+    mesh.material.dispose();
+    this.droppedItems.splice(index, 1);
   }
 
   _requestPointerLock() {
@@ -1803,7 +1884,8 @@ class Game {
     if (!dataStr) return false;
     try {
       const data = JSON.parse(dataStr);
-      this.world.seed = data.seed;
+      if (![data.seed, data.player?.x, data.player?.y, data.player?.z].every(Number.isFinite)) return false;
+      this.seed = this.world.seed = data.seed;
       this.world.generator = new WorldGenerator(data.seed);
       this.player.position.set(data.player.x, data.player.y, data.player.z);
       this.player.yaw = data.player.yaw;
@@ -1813,7 +1895,7 @@ class Game {
       this.inventory.slots = data.inventory || new Array(36).fill(null);
       this.inventory.hotbarSize = data.hotbar || 9;
       this.player.armorSlots = data.armor || [null, null, null, null];
-      this.world.modifications = new Map(data.modifications || []);
+      this.world.restoreModifications(data.modifications || []);
       this.world.doorStates = new Map(data.doorStates || []);
       this.world.chests = new Map(data.chests || []);
       

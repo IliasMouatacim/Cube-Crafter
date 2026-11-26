@@ -223,105 +223,6 @@ canvas {
   display: none;
 }
 
-/* ===== Start screen buttons ===== */
-.start-buttons {
-  display: flex;
-  gap: 15px;
-  margin-bottom: 30px;
-}
-
-#coop-btn {
-  padding: 14px 40px;
-  font-size: 20px;
-  font-family: 'Courier New', monospace;
-  background: #448;
-  color: #fff;
-  border: 3px solid #66a;
-  cursor: pointer;
-  transition: background 0.2s;
-  pointer-events: auto;
-}
-
-#coop-btn:hover {
-  background: #55a;
-}
-
-/* Multiplayer section on start screen */
-.mp-section {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  margin-top: 10px;
-  margin-bottom: 20px;
-  pointer-events: auto;
-}
-
-.mp-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-#host-btn {
-  padding: 10px 30px;
-  font-size: 17px;
-  font-family: 'Courier New', monospace;
-  background: #a64d2c;
-  color: #fff;
-  border: 3px solid #d4774a;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-#host-btn:hover {
-  background: #c0623a;
-}
-
-#join-code {
-  width: 120px;
-  padding: 8px 12px;
-  font-size: 18px;
-  font-family: 'Courier New', monospace;
-  text-align: center;
-  text-transform: lowercase;
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  border: 2px solid #666;
-  outline: none;
-  letter-spacing: 3px;
-}
-
-#join-code:focus {
-  border-color: #aaa;
-}
-
-#join-btn {
-  padding: 8px 20px;
-  font-size: 17px;
-  font-family: 'Courier New', monospace;
-  background: #2c6ea6;
-  color: #fff;
-  border: 3px solid #4a8ed4;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-#join-btn:hover {
-  background: #3a82c0;
-}
-
-.mp-status {
-  font-size: 14px;
-  color: #ccc;
-  min-height: 20px;
-  text-align: center;
-}
-
-.mp-status.error {
-  color: #f66;
-}
-
 /* Room code in-game display */
 .room-code-display {
   position: fixed;
@@ -634,59 +535,6 @@ canvas {
   width: 36px;
   height: 36px;
   border-radius: 2px;
-}
-
-/* Start screen */
-#start-screen {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(135deg, #1a472a, #0d2818);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  pointer-events: auto;
-}
-
-#start-screen h1 {
-  font-size: 64px;
-  margin-bottom: 10px;
-  text-shadow: 3px 3px 0 #000;
-  letter-spacing: 4px;
-}
-
-#start-screen p {
-  font-size: 18px;
-  color: #aaa;
-  margin-bottom: 30px;
-}
-
-#play-btn {
-  padding: 14px 40px;
-  font-size: 20px;
-  font-family: 'Courier New', monospace;
-  background: #4a4;
-  color: #fff;
-  border: 3px solid #6c6;
-  cursor: pointer;
-  margin-bottom: 30px;
-  transition: background 0.2s;
-  pointer-events: auto;
-}
-
-#play-btn:hover {
-  background: #5b5;
-}
-
-.controls-help {
-  text-align: center;
-  color: #888;
-  font-size: 13px;
-  line-height: 1.8;
 }
 
 /* Block selector tooltip */
@@ -1089,8 +937,7 @@ canvas {
 }
 
 /* ===== Mobile responsive overrides ===== */
-@media (max-width: 900px),
-(hover: none) and (pointer: coarse) {
+@media (hover: none) and (pointer: coarse) {
   .desktop-only {
     display: none !important;
   }
@@ -1099,30 +946,9 @@ canvas {
     display: block !important;
   }
 
-  #start-screen h1 {
-    font-size: 36px;
-  }
+}
 
-  #start-screen p {
-    font-size: 14px;
-  }
-
-  #play-btn,
-  #coop-btn {
-    padding: 12px 24px;
-    font-size: 16px;
-  }
-
-  /* Hide co-op button on mobile (needs two keyboards) */
-  #coop-btn {
-    display: none;
-  }
-
-  .controls-help {
-    font-size: 12px;
-    padding: 0 20px;
-  }
-
+@media (max-width: 900px), (hover: none) and (pointer: coarse) {
   /* Smaller hotbar slots for mobile */
   .hotbar-slot {
     width: 40px;
@@ -1224,13 +1050,6 @@ canvas {
     width: 90px;
   }
 }
-#start-screen {
-  height: 100dvh;
-  overflow-y: auto;
-  justify-content: safe center;
-  padding: 1.25rem 1rem;
-}
-
 button:focus-visible, input:focus-visible {
   outline: 3px solid #ffe08b;
   outline-offset: 4px;
@@ -1366,4 +1185,15 @@ button:focus-visible, input:focus-visible {
   #play-settings label {
     min-height: 2.2rem;
   }
+}
+
+#play-settings select {
+  margin-inline-start: auto;
+  min-height: 2.5rem;
+  padding-inline: 0.55rem;
+  border: 1px solid #91aa9c;
+  border-radius: 5px;
+  color: inherit;
+  background: #203a30;
+  font: inherit;
 }

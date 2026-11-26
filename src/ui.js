@@ -6,6 +6,11 @@
 import { BlockType, BlockData } from './blocks.js';
 import { ItemData, ItemCategory, ArmorSlot } from './items.js';
 
+const MINIMAP_COLORS = [
+  '#7ec850', '#c2b280', '#228b22', '#808080', '#dcdcdc', '#4169e1',
+  '#006400', '#9acd32', '#2f4f2f', '#8b0000', '#90ee90', '#cd853f', '#87ceeb', '#556b2f',
+];
+
 export class UI {
   constructor(inventory, prefix = '') {
     this.inventory = inventory;
@@ -28,7 +33,7 @@ export class UI {
     this.timeDisplay = document.getElementById(pf + 'time-display');
     this.furnaceScreen = document.getElementById(pf + 'furnace-screen');
     this.armorSlotsEl = document.getElementById(pf + 'armor-slots');
-    this.minimapEl = document.getElementById(pf + 'minimap');
+    this.minimapContext = document.getElementById(pf + 'minimap')?.querySelector('canvas')?.getContext('2d');
 
     this._buildHotbar();
     this._buildHealthBar();
@@ -56,7 +61,11 @@ export class UI {
     if (!this.timeDisplay) return;
     const timeStr = dayNight.getTimeString();
     const icon = dayNight.isNight ? '🌙' : dayNight.isDawn || dayNight.isDusk ? '🌅' : '☀️';
-    this.timeDisplay.innerHTML = `${icon} Day ${dayNight.dayCount} - ${timeStr}`;
+    const text = `${icon} Day ${dayNight.dayCount} - ${timeStr}`;
+    if (text !== this.lastTimeDisplay) {
+      this.lastTimeDisplay = text;
+      this.timeDisplay.textContent = text;
+    }
   }
 
   // Create an icon for a slot (works for both blocks and items)
@@ -452,6 +461,9 @@ export class UI {
 
   updateArmorSlots(playerArmorSlots) {
     if (!this.armorSlotsEl) return;
+    const signature = playerArmorSlots.map(slot => slot?.id ?? '').join(',');
+    if (signature === this.lastArmor) return;
+    this.lastArmor = signature;
     const slotNames = ['Helmet', 'Chestplate', 'Leggings', 'Boots'];
     this.armorSlotsEl.innerHTML = '';
     for (let i = 0; i < 4; i++) {
@@ -473,33 +485,25 @@ export class UI {
   }
 
   updateMinimap(playerPos, worldGen) {
-    if (!this.minimapEl) return;
-    const canvas = this.minimapEl.querySelector('canvas');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const size = canvas.width;
-    const half = Math.floor(size / 2);
-    const px = Math.floor(playerPos.x);
-    const pz = Math.floor(playerPos.z);
+    const ctx = this.minimapContext;
+    if (!ctx) return;
+    const { width, height } = ctx.canvas;
+    const pixelSize = 4;
+    const worldStep = pixelSize * 2;
+    const px = Math.floor(playerPos.x / worldStep) * worldStep;
+    const pz = Math.floor(playerPos.z / worldStep) * worldStep;
+    if (this.lastMap?.generator === worldGen && this.lastMap.x === px && this.lastMap.z === pz) return;
+    this.lastMap = { generator: worldGen, x: px, z: pz };
 
-    for (let dx = -half; dx < half; dx++) {
-      for (let dz = -half; dz < half; dz++) {
-        const wx = px + dx * 2;
-        const wz = pz + dz * 2;
-        const biome = worldGen.getBiome(wx, wz);
-        const colors = [0x7ec850, 0xc2b280, 0x228b22, 0x808080, 0xdcdcdc, 0x4169e1,
-          0x006400, 0x9acd32, 0x2f4f2f, 0x8b0000, 0x90ee90, 0xcd853f, 0x87ceeb, 0x556b2f];
-        const color = colors[biome] || 0x808080;
-        const r = (color >> 16) & 0xff;
-        const g = (color >> 8) & 0xff;
-        const b = color & 0xff;
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(half + dx, half + dz, 1, 1);
+    for (let x = 0; x < width; x += pixelSize) {
+      for (let z = 0; z < height; z += pixelSize) {
+        const biome = worldGen.getBiome(px + (x - width / 2) * 2, pz + (z - height / 2) * 2);
+        ctx.fillStyle = MINIMAP_COLORS[biome] ?? '#808080';
+        ctx.fillRect(x, z, pixelSize, pixelSize);
       }
     }
-    // Player dot
     ctx.fillStyle = '#ff0000';
-    ctx.fillRect(half - 1, half - 1, 3, 3);
+    ctx.fillRect(width / 2 - 1, height / 2 - 1, 3, 3);
   }
 
   updateHotbar() {
@@ -560,7 +564,8 @@ export class UI {
   }
 
   updateHealth(health) {
-    if (!this.healthBarEl) return;
+    if (!this.healthBarEl || health === this.lastHealth) return;
+    this.lastHealth = health;
     const hearts = this.healthBarEl.children;
     for (let i = 0; i < 10; i++) {
       const hp = (i + 1) * 2;
@@ -578,7 +583,8 @@ export class UI {
   }
 
   updateHunger(hunger) {
-    if (!this.hungerBarEl) return;
+    if (!this.hungerBarEl || hunger === this.lastHunger) return;
+    this.lastHunger = hunger;
     const icons = this.hungerBarEl.children;
     for (let i = 0; i < 10; i++) {
       const hp = (i + 1) * 2;

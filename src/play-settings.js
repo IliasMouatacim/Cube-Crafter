@@ -2,9 +2,12 @@ const STORAGE_KEY = 'cubecrafter_play_settings';
 
 export class PlaySettings {
   constructor(onChange, onToggle) {
+    const touch = window.matchMedia('(pointer: coarse)').matches;
     const defaults = {
-      reflections: true,
-      shadows: !window.matchMedia('(pointer: coarse)').matches,
+      reflections: !touch,
+      shadows: !touch,
+      viewDistance: touch ? '3' : '4',
+      adaptiveResolution: true,
       reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
       highContrast: false,
       creatureCues: true,
@@ -21,6 +24,7 @@ export class PlaySettings {
     for (const [key, initial] of Object.entries(defaults)) {
       if (typeof saved?.[key] === typeof initial) this.values[key] = saved[key];
     }
+    if (!['3', '4', '6'].includes(this.values.viewDistance)) this.values.viewDistance = defaults.viewDistance;
     this.values.sensitivity = Math.min(2, Math.max(0.5, this.values.sensitivity));
 
     this.dialog = document.getElementById('play-settings');
@@ -30,16 +34,17 @@ export class PlaySettings {
     }
     document.addEventListener('keydown', event => {
       if (event.code !== 'KeyM' || event.repeat || this.dialog.open ||
-          event.target.matches('input, textarea, select, [contenteditable]')) return;
+          event.target.closest('dialog, input, textarea, select, [contenteditable]')) return;
       event.preventDefault();
       this.open(onToggle);
     });
-    for (const input of this.dialog.querySelectorAll('input[name]')) {
+    for (const input of this.dialog.querySelectorAll('input[name], select[name]')) {
       const key = input.name;
       if (input.type === 'checkbox') input.checked = this.values[key];
       else input.value = this.values[key];
       input.addEventListener('input', () => {
-        this.values[key] = input.type === 'checkbox' ? input.checked : input.valueAsNumber;
+        this.values[key] = input.type === 'checkbox' ? input.checked :
+          input.type === 'range' ? input.valueAsNumber : input.value;
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(this.values));
         } catch {

@@ -9,7 +9,9 @@
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="screen-orientation" content="landscape" />
   <title>VoxelCraft</title>
+  <link rel="preload" as="image" href="/menu-landscape.webp">
   <link rel="stylesheet" href="/src/styles.css" />
+  <link rel="stylesheet" href="/src/start-screen.css" />
 </head>
 
 <body>
@@ -105,44 +107,83 @@
       </div>
     </div>
 
-    <!-- Start screen -->
-    <div id="start-screen">
-      <h1>VoxelCraft</h1>
-      <p>Explore, build, and survive in a voxel world.</p>
-      <div class="start-buttons">
-        <button id="play-btn">Solo Play</button>
-        <button id="coop-btn">Split-Screen Co-op</button>
-        <button type="button" data-open-settings>Settings</button>
-      </div>
-      <div class="mp-section">
-        <div class="mp-row">
-          <button id="host-btn">Host Online Game</button>
+    <main id="start-screen" aria-labelledby="game-title">
+      <div class="launch-layout">
+        <header class="launch-header">
+          <div class="launch-mark" aria-hidden="true"></div>
+          <nav class="launch-tools" aria-label="Game menu">
+            <button id="controls-btn" type="button" aria-haspopup="dialog">Controls</button>
+            <button type="button" data-open-settings aria-haspopup="dialog">Settings</button>
+          </nav>
+        </header>
+
+        <div class="launch-body">
+          <section class="launch-intro">
+            <h1 id="game-title">Voxel<span>Craft</span></h1>
+            <p>Explore vast landscapes, build block by block, and see what comes out after dark.</p>
+            <div class="launch-actions">
+              <button id="play-btn" class="launch-primary" type="button">Solo Play <span class="launch-arrow" aria-hidden="true"></span></button>
+              <button id="coop-btn" class="launch-secondary" type="button">Split-Screen Co-op</button>
+            </div>
+          </section>
+
+          <section class="launch-multiplayer" aria-labelledby="online-title">
+            <h2 id="online-title">Online multiplayer</h2>
+            <button id="host-btn" class="launch-secondary" type="button">Host a game <span aria-hidden="true">+</span></button>
+            <div class="launch-join">
+              <label for="join-code">Join with a room code</label>
+              <div class="launch-join-row">
+                <input id="join-code" type="text" placeholder="Room code" maxlength="5" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="mp-status">
+                <button id="join-btn" type="button">Join</button>
+              </div>
+            </div>
+            <div id="mp-status" class="mp-status" role="status" aria-live="polite"></div>
+          </section>
         </div>
-        <div class="mp-row">
-          <input id="join-code" type="text" placeholder="Room code" aria-label="Room code" maxlength="5" autocomplete="off" spellcheck="false" />
-          <button id="join-btn">Join</button>
-        </div>
-        <div id="mp-status" class="mp-status"></div>
       </div>
-      <div class="controls-help desktop-only">
-        <p><strong>Player 1:</strong> WASD - Move | Space - Jump | Shift - Sprint</p>
-        <p>Mouse or arrow keys - Look | Left Click or Z - Mine/Attack | Right Click or X - Place/Interact</p>
-        <p>E - Inventory | 1-9 - Hotbar | Q - Drop | V - Toggle Camera</p>
-        <p>R - Equip Armor | G - Creative Mode | M - Settings</p>
-        <hr style="border-color:#444; margin:8px 0;">
-        <p><strong>Player 2:</strong> Connect a gamepad for split-screen co-op.</p>
-      </div>
-      <div class="controls-help mobile-only">
-        <p>Left side: Move joystick</p>
-        <p>Right side: Look around</p>
-        <p>Buttons: Jump, Mine, Place, Inventory</p>
-      </div>
-    </div>
+    </main>
   </div>
+
+  <dialog id="controls-guide" class="controls-guide" aria-labelledby="controls-title">
+    <form method="dialog">
+      <h2 id="controls-title">Controls</h2>
+      <div class="desktop-only">
+        <dl>
+          <div><dt>Move</dt><dd><kbd>W A S D</kbd></dd></div>
+          <div><dt>Look</dt><dd>Mouse or arrow keys</dd></div>
+          <div><dt>Jump / Sprint</dt><dd><kbd>Space</kbd> / <kbd>Shift</kbd></dd></div>
+          <div><dt>Mine / Attack</dt><dd>Left click or <kbd>Z</kbd></dd></div>
+          <div><dt>Place / Interact</dt><dd>Right click or <kbd>X</kbd></dd></div>
+          <div><dt>Inventory / Hotbar</dt><dd><kbd>E</kbd> / <kbd>1–9</kbd></dd></div>
+          <div><dt>Drop / Equip armor</dt><dd><kbd>Q</kbd> / <kbd>R</kbd></dd></div>
+          <div><dt>Camera / Creative mode</dt><dd><kbd>V</kbd> / <kbd>G</kbd></dd></div>
+          <div><dt>Settings</dt><dd><kbd>M</kbd></dd></div>
+        </dl>
+        <p>For split-screen co-op, connect a gamepad for Player 2.</p>
+      </div>
+      <div class="mobile-only">
+        <dl>
+          <div><dt>Move</dt><dd>Left joystick</dd></div>
+          <div><dt>Look</dt><dd>Drag the right side</dd></div>
+          <div><dt>Actions</dt><dd>Use the on-screen buttons to jump, mine, place, and open your inventory.</dd></div>
+        </dl>
+      </div>
+      <button type="submit">Done</button>
+    </form>
+  </dialog>
+
   <dialog id="play-settings" aria-labelledby="settings-title">
     <form method="dialog">
       <h2 id="settings-title">Graphics and accessibility</h2>
       <label><input name="reflections" type="checkbox"> Water reflections</label>
+      <label>View distance
+        <select name="viewDistance">
+          <option value="3">Near</option>
+          <option value="4">Balanced</option>
+          <option value="6">Far</option>
+        </select>
+      </label>
+      <label><input name="adaptiveResolution" type="checkbox"> Adaptive graphics</label>
       <label><input name="shadows" type="checkbox"> Dynamic shadows</label>
       <label><input name="reducedMotion" type="checkbox"> Reduce motion and flashing</label>
       <label><input name="highContrast" type="checkbox"> Brighter nights and stronger crosshair contrast</label>

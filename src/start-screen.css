@@ -1,0 +1,408 @@
+@font-face {
+  font-family: 'Barlow Condensed';
+  src: url('/fonts/barlow-condensed-latin-800-normal.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+}
+
+#start-screen {
+  --launch-ink: #f5f7ee;
+  --launch-muted: #d4dfd3;
+  --launch-accent: #d8f989;
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+  overflow: auto;
+  z-index: 1000;
+  pointer-events: auto;
+  color: var(--launch-ink);
+  font-family: system-ui, sans-serif;
+  background: #122721;
+}
+
+#start-screen::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgb(7 19 17 / 52%), transparent 25%, transparent 57%, rgb(7 19 17 / 78%)),
+    linear-gradient(90deg, rgb(7 19 17 / 91%), rgb(7 19 17 / 75%) 28%, rgb(7 19 17 / 16%) 70%, rgb(7 19 17 / 14%)),
+    url('/menu-landscape.webp') center 52% / cover no-repeat;
+}
+
+.launch-layout {
+  width: min(100%, 1536px);
+  min-height: 100%;
+  margin-inline: auto;
+  padding: clamp(1.25rem, 4vw, 3.5rem) clamp(1.25rem, 6vw, 6rem) clamp(2rem, 7vh, 5rem);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.launch-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.launch-mark {
+  width: 40px;
+  height: 44px;
+  flex: 0 0 auto;
+  background: #a7c875;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  position: relative;
+}
+
+.launch-mark::before, .launch-mark::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.launch-mark::before {
+  background: #dcf5a3;
+  clip-path: polygon(50% 0, 100% 25%, 50% 50%, 0 25%);
+}
+
+.launch-mark::after {
+  background: #6c924d;
+  clip-path: polygon(100% 25%, 100% 75%, 50% 100%, 50% 50%);
+}
+
+.launch-tools {
+  display: flex;
+  gap: 0.55rem;
+}
+
+#start-screen button, #start-screen input {
+  min-height: 46px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: inherit;
+  font: inherit;
+}
+
+#start-screen button {
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 700;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+#start-screen button:focus-visible, #start-screen input:focus-visible {
+  outline: 3px solid #ffdf8e;
+  outline-offset: 3px;
+}
+
+#start-screen .launch-tools button {
+  padding-inline: 1rem;
+  background: rgb(10 30 24 / 76%);
+  border-color: rgb(241 251 231 / 28%);
+}
+
+#start-screen .launch-tools button:hover {
+  background: #294439;
+  border-color: #b7d298;
+}
+
+.launch-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(17rem, 21rem);
+  align-items: end;
+  gap: clamp(2rem, 5vw, 5rem);
+  padding-top: clamp(3.5rem, 12vh, 8rem);
+  padding-bottom: clamp(0.25rem, 9vh, 6rem);
+}
+
+.launch-intro {
+  align-self: center;
+}
+
+#game-title {
+  font-family: 'Barlow Condensed', Impact, 'Arial Narrow', sans-serif;
+  font-size: clamp(5rem, 11.3vw, 11rem);
+  font-weight: 800;
+  line-height: 0.85;
+  letter-spacing: -0.025em;
+  text-transform: uppercase;
+  color: #f9f8e8;
+  text-shadow: 0 0.05em 0 #101f17, 0 0.11em 0.28em rgb(4 12 9 / 55%);
+}
+
+#game-title span {
+  color: var(--launch-accent);
+}
+
+.launch-intro p {
+  margin-top: clamp(1.25rem, 4vw, 2rem);
+  max-width: 30rem;
+  color: var(--launch-muted);
+  font-size: clamp(1.05rem, 1.8vw, 1.35rem);
+  line-height: 1.55;
+  text-shadow: 0 2px 8px #061410;
+}
+
+.launch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  margin-top: clamp(1.5rem, 4vw, 2.6rem);
+}
+
+#start-screen .launch-actions button {
+  min-height: 58px;
+  padding-inline: clamp(1.05rem, 2.6vw, 1.65rem);
+}
+
+#start-screen .launch-primary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 2.65rem;
+  color: #14210d;
+  background: var(--launch-accent);
+  border-color: #e9ffb7;
+  box-shadow: 0 4px 0 #779c43, 0 8px 24px rgb(3 14 8 / 44%);
+}
+
+#start-screen .launch-primary:hover {
+  background: #eeffba;
+}
+
+.launch-arrow {
+  width: 17px;
+  height: 14px;
+  position: relative;
+  background: linear-gradient(currentColor, currentColor) left center / 100% 2px no-repeat;
+}
+
+.launch-arrow::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 1px;
+  width: 8px;
+  height: 8px;
+  border-top: 2px solid;
+  border-right: 2px solid;
+  transform: rotate(45deg);
+}
+
+#start-screen .launch-secondary {
+  background: #182f26;
+  border-color: #567465;
+}
+
+#start-screen .launch-secondary:hover {
+  background: #284a38;
+  border-color: #c1dc9d;
+}
+
+.launch-multiplayer {
+  padding: clamp(1.1rem, 2.6vw, 1.6rem);
+  border: 1px solid #627b68;
+  border-radius: 12px;
+  background: rgb(9 26 21 / 94%);
+  box-shadow: 0 16px 50px rgb(3 13 9 / 38%);
+}
+
+.launch-multiplayer h2 {
+  font-size: 1.15rem;
+  line-height: 1.3;
+  margin-bottom: 1rem;
+}
+
+#host-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline: 0.85rem;
+}
+
+#host-btn span {
+  color: var(--launch-accent);
+  font-size: 1.25rem;
+}
+
+.launch-join {
+  margin-top: 1.1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #3d5647;
+}
+
+.launch-join label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 650;
+  color: var(--launch-muted);
+  margin-bottom: 0.55rem;
+}
+
+.launch-join-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.55rem;
+}
+
+#start-screen #join-code {
+  width: 100%;
+  padding-inline: 0.7rem;
+  background: #0c1914;
+  border-color: #627b68;
+}
+
+#join-code::placeholder {
+  color: #aebbae;
+}
+
+#start-screen #join-btn {
+  padding-inline: 1rem;
+  color: #e8f2d7;
+  background: #344e38;
+  border-color: #78976d;
+}
+
+#start-screen #join-btn:hover {
+  background: #466445;
+}
+
+.mp-status {
+  margin-top: 0.75rem;
+  color: var(--launch-muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.mp-status:empty {
+  margin: 0;
+}
+
+.mp-status.error {
+  color: #ffb2a9;
+}
+
+.controls-guide {
+  margin: auto;
+  width: min(34rem, calc(100% - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  padding: clamp(1rem, 4vw, 1.75rem);
+  border: 1px solid #91aa9c;
+  border-radius: 12px;
+  background: #13241f;
+  color: #f4f8f4;
+  font-family: system-ui, sans-serif;
+}
+
+.controls-guide::backdrop {
+  background: rgb(5 12 17 / 78%);
+}
+
+.controls-guide dl {
+  margin-block: 0.85rem;
+}
+
+.controls-guide dl div {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding-block: 0.58rem;
+  border-bottom: 1px solid #3d5647;
+  font-size: 0.9rem;
+}
+
+.controls-guide dd, .controls-guide p {
+  color: #d4e0d7;
+}
+
+.controls-guide kbd {
+  border-radius: 4px;
+  padding: 0.13rem 0.32rem;
+  background: #314b3f;
+  white-space: nowrap;
+}
+
+.controls-guide button {
+  min-height: 44px;
+  margin-top: 1rem;
+  padding: 0.4rem 1.5rem;
+  background: #d6eccd;
+  color: #102218;
+  border: 0;
+  border-radius: 5px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 960px) {
+  .launch-layout {
+    padding-inline: clamp(1.15rem, 4vw, 2.5rem);
+  }
+
+  .launch-body {
+    gap: 1.75rem;
+    grid-template-columns: minmax(0, 1fr) minmax(15rem, 18rem);
+  }
+
+  #game-title {
+    font-size: clamp(4.2rem, 10.5vw, 6.4rem);
+  }
+}
+
+@media (max-width: 730px) {
+  #start-screen::before {
+    background:
+      linear-gradient(180deg, rgb(7 19 17 / 66%), rgb(7 19 17 / 46%) 27%, rgb(7 19 17 / 89%) 74%),
+      url('/menu-landscape.webp') 59% 48% / cover no-repeat;
+  }
+
+  .launch-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2rem;
+    align-content: center;
+    padding-block: clamp(3rem, 12vh, 6rem) 0;
+  }
+
+  #game-title {
+    font-size: clamp(3.2rem, 16vw, 6rem);
+  }
+
+  .launch-multiplayer {
+    width: min(100%, 26rem);
+  }
+
+  .launch-intro p {
+    max-width: 23rem;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  #coop-btn {
+    display: none;
+  }
+}
+
+@media (max-height: 600px) and (min-width: 731px) {
+  .launch-body {
+    padding-block: 2.25rem 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #start-screen button {
+    transition: none;
+  }
+}
+
+.reduced-motion #start-screen button {
+  transition: none;
+}

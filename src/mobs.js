@@ -902,7 +902,6 @@ class Mob {
     this.attackCooldown = Math.max(0, this.attackCooldown - dt);
 
     // AI behavior (use temp vectors — no allocations)
-    this.nearestPlayerY = playerPos.y;
     _tmpVec.subVectors(playerPos, this.position);
     _tmpVec.y = 0;
     const distToPlayer = _tmpVec.length();
@@ -915,7 +914,7 @@ class Mob {
     } else if (this.isNPC) {
       this._npcAI(dt);
     } else {
-      this._animalAI(dt, _tmpVec, distToPlayer, playerMoving);
+      this._animalAI(dt, _tmpVec, distToPlayer, playerPos, playerMoving);
     }
 
     // Gravity
@@ -1081,11 +1080,11 @@ class Mob {
     this.mesh.rotation.y = Math.atan2(direction.x, direction.z);
   }
 
-  _animalAI(dt, toPlayer, distance, playerMoving) {
+  _animalAI(dt, toPlayer, distance, playerPos, playerMoving) {
     this.fleeTimer = Math.max(0, this.fleeTimer - dt);
     this.fleeing = this.fleeTimer > 0;
     const skittish = SKITTISH.has(this.type.name);
-    const near = Math.abs(this.position.y - this.nearestPlayerY) < 3;
+    const near = Math.abs(this.position.y - playerPos.y) < 3;
     const seesPlayer = near && distance < 8 &&
       clearPath(this.world, sightOrigin.copy(this.position).addScaledVector(UP, this.type.h * 0.7), playerPos, 0.85);
     const heardSprint = near && skittish && playerMoving && distance < 8;

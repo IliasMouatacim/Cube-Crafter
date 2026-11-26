@@ -1,5 +1,5 @@
 // ============================================================
-// Chunk: data storage + greedy mesh generation
+// Chunk block storage and visible-face meshing
 // Optimized: only emits faces between solid and non-solid blocks
 // ============================================================
 
@@ -37,28 +37,13 @@ export class Chunk {
   }
 
   generate(generator) {
-    this.blocks = generator.generateChunkData(this.cx, this.cz);
-    this.metadata = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
-    
-    // Apply modifications
-    for (const [key, type] of this.world.modifications.entries()) {
-      const parts = key.split(',');
-      const wx = parseInt(parts[0]);
-      const wy = parseInt(parts[1]);
-      const wz = parseInt(parts[2]);
-      
-      const cx = Math.floor(wx / CHUNK_SIZE);
-      const cz = Math.floor(wz / CHUNK_SIZE);
-      if (cx === this.cx && cz === this.cz) {
-        const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-        const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-        if (wy >= 0 && wy < CHUNK_HEIGHT) {
-          const idx = WorldGenerator.blockIndex(lx, wy, lz);
-          this.blocks[idx] = type;
-        }
-      }
-    }
+    this.installBlocks(generator.generateChunkData(this.cx, this.cz));
+  }
 
+  installBlocks(blocks) {
+    this.blocks = blocks;
+    this.metadata = new Uint8Array(blocks.length);
+    this.world.applyChunkEdits(this);
     this.generated = true;
     this.dirty = true;
   }
@@ -100,13 +85,21 @@ export class Chunk {
   setMetadata(lx, ly, lz, value) {
     if (!this.metadata) return;
     if (lx < 0 || lx >= CHUNK_SIZE || lz < 0 || lz >= CHUNK_SIZE || ly < 0 || ly >= CHUNK_HEIGHT) return;
-    this.metadata[WorldGenerator.blockIndex(lx, ly, lz)] = value;
+    const index = WorldGenerator.blockIndex(lx, ly, lz);
+    if (this.metadata[index] === value) return;
+    this.metadata[index] = value;
     this.dirty = true;
   }
 
-  // Build optimized mesh using greedy-ish face culling
   buildMesh(scene, materials) {
     if (!this.blocks) return;
+    this.installMesh(scene, materials, this.createMeshData());
+    this.dirty = false;
+    this.borderDirty = false;
+  }
+
+  // Cull hidden faces and return transferable arrays for the renderer.
+  createMeshData() {
 
     const positions = [];
     const normals = [];
@@ -235,9 +228,10 @@ export class Chunk {
                 const sideB = this._occludes(nx, ny + (dz !== 0 ? vy : 0), nz + (dz === 0 ? vz : 0));
                 const diagonal = this._occludes(nx + (dx === 0 ? vx : 0), ny + (dy === 0 ? vy : 0), nz + (dz === 0 ? vz : 0));
                 const shade = 1 - 0.14 * (sideA && sideB ? 3 : sideA + sideB + diagonal);
-                colors.push(shade, shade, shade);
+                const light = Math.round(shade * 255);
+                colors.push(light, light, light);
               }
-              nArr.push(face.dir[0], face.dir[1], face.dir[2]);
+              nArr.push(face.dir[0] * 127, face.dir[1] * 127, face.dir[2] * 127);
 
               const finalU = uOffset + baseUv[0] * (1 / 16);
               const finalV = vOffset + baseUv[1] * (1 / 16);
@@ -253,49 +247,59 @@ export class Chunk {
       }
     }
 
-    // Remove old meshes
+    const solid = positions.length ? {
+      positions: new Float32Array(positions),
+      normals: new Int8Array(normals),
+      colors: new Uint8Array(colors),
+      uvs: new Float32Array(uvs),
+      indices: vertCount > 65535 ? new Uint32Array(indices) : new Uint16Array(indices),
+    } : null;
+    const water = waterPositions.length ? {
+      positions: new Float32Array(waterPositions),
+      normals: new Int8Array(waterNormals),
+      uvs: new Float32Array(waterUvs),
+      indices: waterVertCount > 65535 ? new Uint32Array(waterIndices) : new Uint16Array(waterIndices),
+    } : null;
+    const bounds = [...surfaceBounds.values()].map(box => [...box.min.toArray(), ...box.max.toArray()]);
+    return { solid, water, bounds };
+  }
+
+  installMesh(scene, materials, { solid, water, bounds }) {
     this._removeMeshes(scene);
-
-    // Create solid mesh
-    if (positions.length > 0) {
-      const geom = new THREE.BufferGeometry();
-      geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-      geom.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-      geom.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-      geom.setIndex(indices);
-      geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-
-      let mat = materials ? materials.solid : new THREE.MeshLambertMaterial({ vertexColors: true });
-      this.mesh = new THREE.Mesh(geom, mat);
+    if (solid) {
+      const material = materials?.solid ?? new THREE.MeshLambertMaterial({ vertexColors: true });
+      this.mesh = this._meshFromData(solid, material, !materials);
       this.mesh.castShadow = true;
       this.mesh.receiveShadow = true;
-      this.mesh.userData.isChunk = true;
-      this.mesh.userData.ownsMaterial = !materials;
       scene.add(this.mesh);
     }
 
-    // Create water mesh (transparent)
-    if (waterPositions.length > 0) {
-      const geom = new THREE.BufferGeometry();
-      geom.setAttribute('position', new THREE.Float32BufferAttribute(waterPositions, 3));
-      geom.setAttribute('normal', new THREE.Float32BufferAttribute(waterNormals, 3));
-      geom.setAttribute('uv', new THREE.Float32BufferAttribute(waterUvs, 2));
-      geom.setIndex(waterIndices);
-
-      let mat = materials ? materials.water : new THREE.MeshLambertMaterial({
+    if (water) {
+      const material = materials?.water ?? new THREE.MeshLambertMaterial({
         transparent: true,
         opacity: 0.6,
         side: THREE.DoubleSide,
       });
-      this.waterMesh = new THREE.Mesh(geom, mat);
-      this.waterMesh.userData.isChunk = true;
-      this.waterMesh.userData.ownsMaterial = !materials;
-      this.waterMesh.userData.surfaceBounds = [...surfaceBounds.values()];
+      this.waterMesh = this._meshFromData(water, material, !materials);
+      this.waterMesh.userData.surfaceBounds = bounds.map(([x0, y0, z0, x1, y1, z1]) =>
+        new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1)));
       if (materials) this.waterMesh.layers.set(WATER_LAYER);
       scene.add(this.waterMesh);
     }
+  }
 
-    this.dirty = false;
+  _meshFromData(data, material, ownsMaterial) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3, true));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(data.uvs, 2));
+    geometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
+    if (data.colors) geometry.setAttribute('color', new THREE.BufferAttribute(data.colors, 3, true));
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.userData.isChunk = true;
+    mesh.userData.ownsMaterial = ownsMaterial;
+    return mesh;
   }
 
   _occludes(x, y, z) {

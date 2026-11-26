@@ -6,7 +6,8 @@ export const WATER_LAYER = 1;
 export class EnvironmentGraphics {
   constructor(scene, sun) {
     this.sun = sun;
-    this.frame = 0;
+    this.elapsed = 0;
+    this.nextShadowUpdate = 0;
     this.views = new WeakMap();
     this.frustum = new THREE.Frustum();
     this.projection = new THREE.Matrix4();
@@ -45,7 +46,7 @@ export class EnvironmentGraphics {
           #include <colorspace_fragment>
         }`,
     }));
-    this.sky.renderOrder = -100;
+    this.sky.renderOrder = 10;
     scene.add(this.sky);
 
     this.water = new THREE.ShaderMaterial({
@@ -112,7 +113,7 @@ export class EnvironmentGraphics {
   }
 
   update(dt, cycle, camera, reducedMotion) {
-    this.frame++;
+    this.elapsed += dt;
     this.sky.position.copy(camera.position);
     cycle.stars.position.copy(camera.position);
     const sky = this.sky.material.uniforms;
@@ -134,7 +135,8 @@ export class EnvironmentGraphics {
     }
     this.sun.castShadow = enabled && this.sun.intensity > 0.18;
     if (!this.sun.castShadow) return;
-    if (this.frame % 6 === 1 || renderer.shadowMap.needsUpdate) {
+    if (this.elapsed >= this.nextShadowUpdate || renderer.shadowMap.needsUpdate) {
+      this.nextShadowUpdate = this.elapsed + 0.16;
       this.shadowAnchor.copy(playerPosition).divideScalar(2).floor().multiplyScalar(2);
       renderer.shadowMap.needsUpdate = true;
     }
@@ -169,11 +171,11 @@ export class EnvironmentGraphics {
         textureWidth: 384, textureHeight: 224, clipBias: 0.003, multisample: 0,
       });
       reflector.rotation.x = -Math.PI / 2;
-      view = { reflector, frame: -Infinity, height: NaN };
+      view = { reflector, nextUpdate: 0, height: NaN };
       this.views.set(camera, view);
     }
     const { reflector } = view;
-    if (view.height !== height || this.frame - view.frame >= 3) {
+    if (view.height !== height || this.elapsed >= view.nextUpdate) {
       reflector.position.y = height;
       reflector.updateMatrixWorld();
       // The mirror camera uses layer 0; water only renders on the main cameras.
@@ -184,7 +186,7 @@ export class EnvironmentGraphics {
       } finally {
         renderer.shadowMap.needsUpdate = refreshShadows;
       }
-      view.frame = this.frame;
+      view.nextUpdate = this.elapsed + 0.12;
       view.height = height;
     }
     uniforms.mirrorMatrix.value.copy(reflector.material.uniforms.textureMatrix.value).multiply(this.projection.copy(reflector.matrixWorld).invert());
